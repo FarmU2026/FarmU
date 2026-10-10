@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 from . import approvals
 from . import contracts as C
-from .approvals import FieldwatchError, clock, iso
+from .approvals import FieldwatchError, iso
 
 log = logging.getLogger("fieldwatch.actions")
 
@@ -114,7 +114,7 @@ def _require_approval(approval_id: str, investigation_id: str, action_type: str)
         raise FieldwatchError("POLICY_DENIED", f"approval is for a {a.action_type}, not a {action_type}")
     if a.status != "approved":
         raise FieldwatchError("POLICY_DENIED", f"approval is {a.status}, not approved")
-    if clock() >= approvals.parse_time(a.expires_at):
+    if approvals.clock() >= approvals.parse_time(a.expires_at):
         raise FieldwatchError("POLICY_DENIED", "approval has expired")
     return a
 
@@ -142,7 +142,7 @@ def _create(action_type: str, *, approval_id: str, investigation_id: str, assign
             "type": action_type, "assignee_person_id": assignee_person_id,
             "pin": list(pin) if pin else None, "instructions": instructions.strip(), "status": "sent",
             "field_name": field_name, "farm_id": farm_id, "delivered": message is None,
-            "created_at": iso(clock()),
+            "created_at": iso(approvals.clock()),
         }
         item = {k: v for k, v in item.items() if v is not None}
         if not s.put_action_if_absent(item):  # lost a race: the other call's action is the one
@@ -206,7 +206,7 @@ def draft_insurance_notice(*, approval_id: str, investigation_id: str, person_id
     a = approvals.get(approval_id)  # the summary is what the farmer approved; it anchors the draft
     summary = details or (a.summary if a else "")
     draft = ("DRAFT notice of possible crop loss. Review before sending to your insurance agent.\n"
-             f"Date: {clock():%Y-%m-%d}\nWhat happened: {summary}\n"
+             f"Date: {approvals.clock():%Y-%m-%d}\nWhat happened: {summary}\n"
              "Please add: policy number, field location and the date you first noticed it.")
     return _create("insurance_notice", approval_id=approval_id, investigation_id=investigation_id,
                    assignee_person_id=person_id, instructions=draft, pin=None, field_name=None, farm_id=None,
@@ -245,7 +245,7 @@ def mark_done(action_id: str, by: str) -> C.Action:
     if not item:
         raise FieldwatchError("NOT_FOUND", f"no action {action_id}")
     if item["status"] != "done":
-        fields = {"status": "done", "done_at": iso(clock()), "completed_by": by}
+        fields = {"status": "done", "done_at": iso(approvals.clock()), "completed_by": by}
         if s.update_action(action_id, fields, only_if={"status": "sent"}):
             item = {**item, **fields}
             approvals.publish_event("ActionCompleted", C.ActionCompleted(
