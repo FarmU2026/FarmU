@@ -1,0 +1,84 @@
+{
+  "farm_id": "demo-farm",
+  "phone": "402 555 0100",
+  "farmer": {
+    "name": "Dad",
+    "channel": "text"
+  },
+  "last_checked": "2026-07-18T17:10:00",
+  "fields": [
+    {
+      "id": "north-pivot",
+      "name": "north pivot",
+      "crop": "corn",
+      "acres": 130,
+      "polygon": [
+        [
+          -96.546,
+          42.153
+        ],
+        [
+          -96.534,
+          42.153
+        ],
+        [
+          -96.534,
+          42.166
+        ],
+        [
+          -96.546,
+          42.166
+        ]
+      ],
+      "last_scene_date": "2026-07-18",
+      "stats": {
+        "scene_date": "2026-07-18",
+        "cloud_cover_pct": 3,
+        "health_index_median": 0.71,
+        "health_index_low_10pct": 0.32,
+        "weakest_area": "outer edge",
+        "share_of_field_below_0_3": 0.09
+      }
+    },
+    {
+      "id": "johnson-quarter",
+      "name": "Johnson quarter",
+      "crop": "soybeans",
+      "acres": 160,
+      "polygon": [
+        [
+          -96.53,
+          42.15
+        ],
+        [
+          -96.518,
+          42.15
+        ],
+        [
+          -96.518,
+          42.161
+        ],
+        [
+          -96.53,
+          42.161
+        ]
+      ],
+      "last_scene_date": "2026-07-18",
+      "stats": {
+        "scene_date": "2026-07-18",
+        "cloud_cover_pct": 3,
+        "health_index_median": 0.78,
+        "health_index_low_10pct": 0.6,
+        "weakest_area": "southwest corner",
+        "share_of_field_below_0_3": 0.01
+      }
+    }
+  ],
+  "thread": [
+    {
+      "at": "2026-07-18T17:00:00",
+      "who": "fieldwatch",
+      "text": "Hi Dad, FieldWatch here. I am watching 2 fields and will text you after every clear satellite pass. Reply STOP anytime."
+    }
+  ]
+}
