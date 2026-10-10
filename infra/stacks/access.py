@@ -15,7 +15,9 @@ from aws_cdk import Duration, Stack, Tags
 from aws_cdk import aws_iam as iam
 from constructs import Construct
 
-GITHUB_REPOS = ["FarmU2026/FarmU", "kdumbl/FarmU"]  # current org home first; old path kept in case of a transfer back
+# GitHub sends the immutable subject form for this repo ("owner@owner_id/repo@repo_id"), which survives
+# renames and can't be claimed by a new repo with the same name. Plain names kept as fallbacks.
+GITHUB_REPOS = ["FarmU2026@340763669/FarmU@1413406950", "FarmU2026/FarmU", "kdumbl/FarmU"]
 GITHUB_HOST = "token.actions.githubusercontent.com"
 BOUNDARY_NAME = "fieldwatch-boundary"
 DEVELOPERS = ["kurt", "aaron"]
