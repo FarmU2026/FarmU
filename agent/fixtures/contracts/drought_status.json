@@ -1,0 +1,15 @@
+{
+  "county_fips": "31173",
+  "as_of": "2026-07-14",
+  "category": "D1",
+  "pct_by_category": {
+    "none": 0.0,
+    "D0": 1.33,
+    "D1": 91.26,
+    "D2": 7.41,
+    "D3": 0.0,
+    "D4": 0.0
+  },
+  "rule": "worst category covering at least 50% of the county",
+  "source": "US Drought Monitor"
+}

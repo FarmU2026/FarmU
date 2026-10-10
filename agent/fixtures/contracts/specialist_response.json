@@ -1,0 +1,19 @@
+{
+  "agent": "imagery",
+  "evidence": [
+    {
+      "evidence_id": "ev1",
+      "hypothesis": "pivot_failure",
+      "direction": "supports",
+      "weight_key": "ring_pattern_strong",
+      "source": "analyze_field",
+      "value": {
+        "ring_score": 0.82
+      },
+      "reason": "The weak area is a ring on the outer edge, the path of the pivot's last span.",
+      "created_at": "2026-07-18T17:21:05Z"
+    }
+  ],
+  "notes": "Ring on the outer 150 m; inner circle healthy.",
+  "tool_calls": 2
+}

@@ -1,0 +1,51 @@
+{
+  "schema_version": "1",
+  "occurred_at": "2026-07-18T17:21:05Z",
+  "investigation_id": "inv-north-pivot-20260718",
+  "field": {
+    "farm_id": "wohleb-farm",
+    "field_id": "north-pivot"
+  },
+  "condition": "pivot_failure",
+  "summary": "A nozzle or tower on the outer span likely isn't watering.",
+  "hypotheses": [
+    {
+      "condition": "pivot_failure",
+      "probability": 0.86,
+      "status": "likely"
+    },
+    {
+      "condition": "drought",
+      "probability": 0.03,
+      "status": "ruled_out"
+    },
+    {
+      "condition": "hail",
+      "probability": 0.02,
+      "status": "ruled_out"
+    },
+    {
+      "condition": "sandy_soil_water_stress",
+      "probability": 0.04,
+      "status": "ruled_out"
+    },
+    {
+      "condition": "disease_pest",
+      "probability": 0.05,
+      "status": "open"
+    }
+  ],
+  "impact": {
+    "affected_acres": 12.1,
+    "low_usd": 9000.0,
+    "high_usd": 14000.0,
+    "basis": "210 bu/ac x $4.20/bu x 12 ac, 35-55% loss if unwatered 7 more days at R2 (water stress around silking)"
+  },
+  "proposed_action": {
+    "action_type": "work_order",
+    "summary": "Check the outer span nozzles and end tower on the north pivot",
+    "assignee_person_id": "brother"
+  },
+  "message_id": "msg-001",
+  "fast_path": false
+}

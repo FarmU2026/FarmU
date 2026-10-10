@@ -1,0 +1,8 @@
+{
+  "field_id": "north-pivot",
+  "condition": "pivot_failure",
+  "affected_acres": 12.1,
+  "stage": "R2 (blister)",
+  "severity": "high",
+  "days_until_fixed": 7
+}

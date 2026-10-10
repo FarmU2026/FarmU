@@ -1,0 +1,11 @@
+{
+  "schema_version": "1",
+  "occurred_at": "2026-07-18T17:21:05Z",
+  "reply_id": "rep-001",
+  "farm_id": "wohleb-farm",
+  "person_id": "dad",
+  "intent": "more",
+  "text": "MORE",
+  "investigation_id": "inv-north-pivot-20260718",
+  "approval_id": null
+}

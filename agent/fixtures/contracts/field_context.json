@@ -1,0 +1,47 @@
+{
+  "schema_version": "1",
+  "field_id": "north-pivot",
+  "built_at": "2026-07-18T17:21:05Z",
+  "soil": {
+    "field_id": "north-pivot",
+    "map_units": [
+      {
+        "mukey": "427691",
+        "name": "Holdrege silt loam, 0 to 1 percent slopes",
+        "pct_area": 100.0,
+        "texture_0_30": "silt loam",
+        "texture_30_100": "silty clay loam",
+        "awc_0_100_cm": 21.5,
+        "drainage_class": "Well drained",
+        "hydro_group": "B",
+        "sandy": false
+      }
+    ],
+    "zones_key": null,
+    "source": "NRCS Soil Data Access"
+  },
+  "terrain": {
+    "slope_mean_pct": 0.8,
+    "lowspot_pct": 3.5,
+    "lowspot_key": null,
+    "source": "USGS 3DEP"
+  },
+  "crop_history": {
+    "2024": "soybeans",
+    "2025": "corn"
+  },
+  "cohort_field_ids": [
+    "csb-31173-001234",
+    "csb-31173-001240"
+  ],
+  "county_fips": "31173",
+  "expected_yield_bu_ac": 210.0,
+  "price_usd_bu": 4.2,
+  "price_as_of": "2026-07-17",
+  "stage": "R2 (blister)",
+  "sources": [
+    "NRCS Soil Data Access",
+    "USGS 3DEP",
+    "USDA CSB 2018-2025"
+  ]
+}

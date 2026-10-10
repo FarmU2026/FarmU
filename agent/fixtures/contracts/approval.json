@@ -1,0 +1,12 @@
+{
+  "approval_id": "apr-001",
+  "investigation_id": "inv-north-pivot-20260718",
+  "action_type": "work_order",
+  "summary": "Check the outer span nozzles and end tower on the north pivot",
+  "sent_to_person_id": "dad",
+  "status": "pending",
+  "decided_by": null,
+  "decided_at": null,
+  "channel": null,
+  "expires_at": "2026-07-19T17:21:05Z"
+}

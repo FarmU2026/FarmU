@@ -1,0 +1,8 @@
+{
+  "schema_version": "1",
+  "action": "reply",
+  "investigation_id": "inv-north-pivot-20260718",
+  "interrupt_id": "int-abc123",
+  "text": "YES",
+  "approval_id": "apr-001"
+}

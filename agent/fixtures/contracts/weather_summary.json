@@ -1,0 +1,19 @@
+{
+  "field_id": "north-pivot",
+  "start": "2026-06-18",
+  "end": "2026-07-18",
+  "daily": [
+    {
+      "date": "2026-07-18",
+      "precip_mm": 0.0,
+      "tmax_c": 33.1,
+      "tmin_c": 19.4,
+      "et0_mm": 6.8,
+      "wind_max_kph": 22.0
+    }
+  ],
+  "total_precip_mm": 81.0,
+  "normal_precip_mm": 76.0,
+  "days_over_35c": 2,
+  "source": "Open-Meteo archive"
+}

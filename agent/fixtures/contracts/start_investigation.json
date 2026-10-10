@@ -1,0 +1,8 @@
+{
+  "schema_version": "1",
+  "action": "start",
+  "investigation_id": "inv-north-pivot-20260718",
+  "farm_id": "wohleb-farm",
+  "field": "north-pivot",
+  "anomaly": null
+}

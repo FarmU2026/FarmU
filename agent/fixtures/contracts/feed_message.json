@@ -1,0 +1,23 @@
+{
+  "type": "evidence_added",
+  "ts": "2026-07-18T17:21:05Z",
+  "farm_id": "wohleb-farm",
+  "investigation_id": "inv-north-pivot-20260718",
+  "agent": "environment",
+  "backend": "local",
+  "payload": {
+    "evidence": {
+      "evidence_id": "ev2",
+      "hypothesis": "drought",
+      "direction": "refutes",
+      "weight_key": "rain_normal_30d",
+      "source": "get_weather",
+      "value": {
+        "rain_mm_30d": 81,
+        "normal_mm_30d": 76
+      },
+      "reason": "Rain over the last month was normal.",
+      "created_at": "2026-07-18T17:21:05Z"
+    }
+  }
+}
