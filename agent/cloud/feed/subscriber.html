@@ -1,0 +1,65 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FieldWatch feed subscriber</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 16px; max-width: 900px; }
+  label { display: block; margin: 8px 0 2px; font-weight: 600; }
+  input { width: 100%; box-sizing: border-box; padding: 6px; font: inherit; }
+  button { margin: 10px 8px 0 0; padding: 6px 14px; font: inherit; }
+  #status { margin-top: 10px; font-weight: 600; }
+  #log { margin-top: 10px; background: #111; color: #cfe; padding: 10px; height: 50vh; overflow: auto;
+         white-space: pre-wrap; font: 12px/1.4 ui-monospace, Consolas, monospace; }
+  .t { color: #8cf; } .bad { color: #f88; }
+</style>
+<h1>FieldWatch live feed: test subscriber</h1>
+<p>Open this file straight from disk. Fill in the three stack outputs of <code>FieldWatch-Feed</code>, then Connect.</p>
+<label>HTTP endpoint (output FeedHttpEndpoint)</label>
+<input id="http" placeholder="https://xxxx.appsync-api.us-west-2.amazonaws.com/event">
+<label>Realtime endpoint (output FeedRealtimeEndpoint)</label>
+<input id="rt" placeholder="wss://xxxx.appsync-realtime-api.us-west-2.amazonaws.com/event/realtime">
+<label>API key (output FeedApiKey)</label>
+<input id="key" placeholder="da2-...">
+<label>Channel</label>
+<input id="chan" value="/fieldwatch/farms/wohleb-farm/feed">
+<button id="go">Connect</button><button id="stop">Disconnect</button>
+<div id="status">not connected</div>
+<div id="log"></div>
+<script>
+const $ = (id) => document.getElementById(id);
+for (const k of ["http", "rt", "key", "chan"]) {            // remember the values in this browser only
+  try { const v = localStorage.getItem("fwfeed." + k); if (v) $(k).value = v; } catch {}
+}
+let ws;
+const log = (cls, text) => { const d = document.createElement("div"); d.className = cls;
+  d.textContent = new Date().toISOString().slice(11, 19) + "  " + text; $("log").prepend(d); };
+const b64url = (s) => btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+$("go").onclick = () => {
+  if (ws) ws.close();
+  for (const k of ["http", "rt", "key", "chan"]) { try { localStorage.setItem("fwfeed." + k, $(k).value); } catch {} }
+  const host = new URL($("http").value.trim()).host;
+  const auth = { host, "x-api-key": $("key").value.trim() };
+  ws = new WebSocket($("rt").value.trim(), ["aws-appsync-event-ws", "header-" + b64url(JSON.stringify(auth))]);
+  ws.onopen = () => ws.send(JSON.stringify({ type: "connection_init" }));
+  ws.onclose = () => { $("status").textContent = "closed"; };
+  ws.onerror = () => log("bad", "websocket error (check endpoint and API key)");
+  ws.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.type === "connection_ack") {
+      $("status").textContent = "connected, subscribing";
+      ws.send(JSON.stringify({ type: "subscribe", id: crypto.randomUUID(), channel: $("chan").value.trim(), authorization: auth }));
+    } else if (m.type === "subscribe_success") {
+      $("status").textContent = "subscribed to " + $("chan").value;
+    } else if (m.type === "data") {
+      let ev = m.event; try { ev = JSON.parse(ev); } catch {}
+      log("t", ev && ev.type ? `${ev.type}  ${JSON.stringify(ev)}` : JSON.stringify(m));
+    } else if (m.type === "ka") {
+      // keep-alive
+    } else {
+      log(m.type && m.type.includes("error") ? "bad" : "t", JSON.stringify(m));
+    }
+  };
+};
+$("stop").onclick = () => ws && ws.close();
+</script>
