@@ -17,6 +17,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from . import actions as A
 from . import contracts as C
 from . import tools as T
 from .config import FIXTURES
@@ -55,13 +56,33 @@ class LossIn(_In):
     yield_loss_fraction: float = Field(ge=0, le=1)
 
 
-class WorkOrderIn(_In):
-    investigation_id: str
-    approval_id: str = Field(description="Required: the Gateway rejects calls without it (spike finding 23)")
+APPROVAL_ID_PATTERN = r"^apr-[A-Za-z0-9_-]{3,64}$"  # keep in step with infra/policies/cedar/fieldwatch-write-tools.cedar
+
+
+class _WriteIn(_In):
+    """Every write tool requires both ids. The Gateway rejects a call without them (spike finding 23) and the
+    Cedar policy checks their shape; the tool itself checks the approval's status, owner, type and expiry."""
+
+    investigation_id: str = Field(min_length=1)
+    approval_id: str = Field(pattern=APPROVAL_ID_PATTERN,
+                             description="Required: id of an approved approval for this exact action")
+
+
+class WorkOrderIn(_WriteIn):
     field_id: str
     assignee_person_id: str
     instructions: str
     pin: C.LonLat | None = None
+
+
+class ScoutPinIn(_WriteIn):
+    person_id: str
+    pin: C.LonLat
+    what_to_check: str
+
+
+class InsuranceNoticeIn(_WriteIn):
+    person_id: str
 
 
 @dataclass(frozen=True)
@@ -118,9 +139,16 @@ TOOLS: list[ToolSpec] = [
              "read", C.ScoreRequest, _sample("score_result", C.ScoreResult), output_model=C.ScoreResult, workstream=5, stub=True),
     ToolSpec("estimate_impact", "Dollar range for a condition on the affected acres, from published loss tables.", "read",
              C.ImpactRequest, _sample("impact_estimate", C.ImpactEstimate), output_model=C.ImpactEstimate, workstream=5, stub=True),
+    # --- write tools (workstream 8): need an approved approval_id; see actions.py ---
     ToolSpec("create_work_order", "Send a repair work order to the assignee. Requires an approved approval_id.", "write",
-             WorkOrderIn, _sample("action", C.Action), output_model=C.Action, workstream=8, stub=True,
-             notes="Local mode keeps the interrupt-based tool in tools.py until workstream 8 lands."),
+             WorkOrderIn, A.create_work_order, output_model=C.Action, workstream=8,
+             notes="Texts the assignee via notify.send. Idempotent on approval_id. Locally the agent uses tools.create_work_order, which calls this."),
+    ToolSpec("create_scout_pin", "Drop a scouting pin with what to look for and text it to the person who will walk it. "
+             "Requires an approved approval_id.", "write", ScoutPinIn, A.create_scout_pin, output_model=C.Action,
+             workstream=8, notes="Idempotent on approval_id."),
+    ToolSpec("draft_insurance_notice", "Draft a notice of loss for the farmer to review and send. Requires an approved "
+             "approval_id.", "write", InsuranceNoticeIn, A.draft_insurance_notice, output_model=C.Action, workstream=8,
+             notes="Sends nothing; the draft is in Action.instructions. document_key (S3) is not implemented yet."),
 ]
 
 BY_NAME = {t.name: t for t in TOOLS}

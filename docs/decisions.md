@@ -27,7 +27,7 @@ The AgentCore CLI deploys with CDK (spike finding 31), and the data plane is alr
 - **Caleb's AWS account, region us-west-2**: where the spikes validated everything, next to the Sentinel-2 files. Budget alert $50/month.
 - **No resources in us-east-1** (the account's other project uses it). The MRMS hail topic lives in us-east-1, so we subscribe an **SQS queue in us-west-2** to it directly instead of the plan's us-east-1 forwarder Lambda.
 - The account also hosts another project. Never create `preflight-*` or `pr-*` names, never use the tag `preflight-derive`, never create or modify the account's GitHub OIDC provider (we reference it). The `fieldwatch-boundary` permissions boundary (`infra/policies/`) enforces this on every FieldWatch role, user and the CDK execution role.
-- **Deploys:** Caleb from his machine, and GitHub Actions (`.github/workflows/deploy.yml`) through role `fieldwatch-github-deploy` (existing GitHub OIDC provider, `kdumbl/FarmU` main or the `deploy` environment only). Role ARNs and the account ID live in GitHub variables, never in code.
+- **Deploys:** Caleb from his machine, and GitHub Actions (`.github/workflows/deploy.yml`) through role `fieldwatch-github-deploy` (existing GitHub OIDC provider, `FarmU2026/FarmU` main or the `deploy` environment only). Role ARNs and the account ID live in GitHub variables, never in code.
 - **Kurt and Aaron** use IAM users `fieldwatch-kurt` / `fieldwatch-aaron` → role `fieldwatch-dev` (Bedrock, FieldWatch tables and bucket, Lambda invoke, logs, events, AgentCore invoke; no deploys).
 - Local agent runs may use a Bedrock API key in `agent/.env`; API keys can't sign Gateway/Runtime calls.
 

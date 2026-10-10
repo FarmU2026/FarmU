@@ -1,0 +1,58 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "BedrockModels",
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream", "bedrock:Converse", "bedrock:ConverseStream"],
+      "Resource": [
+        "arn:aws:bedrock:*::foundation-model/*",
+        "arn:aws:bedrock:us-west-2:*:inference-profile/*"
+      ]
+    },
+    {
+      "Sid": "CallGatewayTools",
+      "Effect": "Allow",
+      "Action": ["bedrock-agentcore:InvokeGateway"],
+      "Resource": "arn:aws:bedrock-agentcore:us-west-2:*:gateway/*"
+    },
+    {
+      "Sid": "EmitProgressEvents",
+      "Effect": "Allow",
+      "Action": ["events:PutEvents"],
+      "Resource": "arn:aws:events:us-west-2:*:event-bus/fieldwatch"
+    },
+    {
+      "Sid": "InvestigationState",
+      "Effect": "Allow",
+      "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:Query"],
+      "Resource": [
+        "arn:aws:dynamodb:us-west-2:*:table/fw-investigations",
+        "arn:aws:dynamodb:us-west-2:*:table/fw-investigations/index/*"
+      ]
+    },
+    {
+      "Sid": "SessionObjects",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::fieldwatch-dataplane-bucket*/sessions/*"
+    },
+    {
+      "Sid": "SessionListing",
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket"],
+      "Resource": "arn:aws:s3:::fieldwatch-dataplane-bucket*",
+      "Condition": { "StringLike": { "s3:prefix": ["sessions/*"] } }
+    },
+    {
+      "Sid": "ReadDeployedConfig",
+      "Effect": "Allow",
+      "Action": ["ssm:GetParameter"],
+      "Resource": [
+        "arn:aws:ssm:us-west-2:*:parameter/fieldwatch/sessions-bucket",
+        "arn:aws:ssm:us-west-2:*:parameter/fieldwatch/bucket",
+        "arn:aws:ssm:us-west-2:*:parameter/fieldwatch/gateway-url"
+      ]
+    }
+  ]
+}

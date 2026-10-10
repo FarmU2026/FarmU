@@ -16,13 +16,19 @@ import aws_cdk as cdk
 from stacks.access import Access
 from stacks.data_plane import DataPlane
 from stacks.frontend import Frontend
+from stacks.feed import Feed
 
 app = cdk.App()
-env = cdk.Environment(account=os.getenv("CDK_DEFAULT_ACCOUNT"), region=os.getenv("CDK_DEFAULT_REGION", "us-west-2"))
+# Region is fixed: the CDK CLI defaults to us-east-1 when no AWS config is present, and us-east-1 is off limits (D3).
+env = cdk.Environment(account=os.getenv("CDK_DEFAULT_ACCOUNT"), region="us-west-2")
 
 data = DataPlane(app, "FieldWatch-DataPlane", env=env)
 Access(app, "FieldWatch-Access", data=data, env=env)
 Frontend(app, "FieldWatch-Frontend", env=env)  # workstream 14: web/ on S3 + CloudFront
+Feed(app, "FieldWatch-Feed", data=data, env=env)  # workstream 13 (live feed)
+
+from stacks.agent import Agent  # workstream 7
+Agent(app, "FieldWatch-Agent", data=data, env=env)
 
 # Workstream stacks go here, each receiving `data` for the shared bucket, tables and bus, e.g.:
 # from stacks.hazards import Hazards
