@@ -334,3 +334,10 @@ def test_lambda_entrypoint_signs_with_the_session_credentials(tables, monkeypatc
     H.handler(envelope("MessageReceived", {"schema_version": "1", "occurred_at": NOW, "message_id": "m3", "farm_id": FARM,
                                            "person_id": "dad", "body": "hi"}))
     assert len(calls) == 2 and "/us-west-2/appsync/aws4_request" in calls[0][1]["Authorization"]
+
+
+def test_stack_rule_matches_the_projector_event_list():
+    src = (Path(__file__).resolve().parents[2] / "infra" / "stacks" / "feed.py").read_text()
+    import re
+    block = src[src.index("DETAIL_TYPES = ["):src.index("]", src.index("DETAIL_TYPES = ["))]
+    assert set(re.findall(r'"(\w+)"', block)) == set(M.DETAIL_TYPES)
