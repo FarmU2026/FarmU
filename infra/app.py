@@ -15,12 +15,14 @@ import aws_cdk as cdk
 
 from stacks.access import Access
 from stacks.data_plane import DataPlane
+from stacks.feed import Feed
 
 app = cdk.App()
 env = cdk.Environment(account=os.getenv("CDK_DEFAULT_ACCOUNT"), region=os.getenv("CDK_DEFAULT_REGION", "us-west-2"))
 
 data = DataPlane(app, "FieldWatch-DataPlane", env=env)
 Access(app, "FieldWatch-Access", data=data, env=env)
+Feed(app, "FieldWatch-Feed", data=data, env=env)  # workstream 13 (live feed)
 
 # Workstream stacks go here, each receiving `data` for the shared bucket, tables and bus, e.g.:
 # from stacks.hazards import Hazards
