@@ -15,12 +15,14 @@ import aws_cdk as cdk
 
 from stacks.access import Access
 from stacks.data_plane import DataPlane
+from stacks.frontend import Frontend
 
 app = cdk.App()
 env = cdk.Environment(account=os.getenv("CDK_DEFAULT_ACCOUNT"), region=os.getenv("CDK_DEFAULT_REGION", "us-west-2"))
 
 data = DataPlane(app, "FieldWatch-DataPlane", env=env)
 Access(app, "FieldWatch-Access", data=data, env=env)
+Frontend(app, "FieldWatch-Frontend", env=env)  # workstream 14: web/ on S3 + CloudFront
 
 # Workstream stacks go here, each receiving `data` for the shared bucket, tables and bus, e.g.:
 # from stacks.hazards import Hazards
