@@ -15,6 +15,7 @@ import aws_cdk as cdk
 
 from stacks.access import Access
 from stacks.data_plane import DataPlane
+from stacks.scenes import Scenes
 from stacks.feed import Feed
 
 app = cdk.App()
@@ -23,6 +24,7 @@ env = cdk.Environment(account=os.getenv("CDK_DEFAULT_ACCOUNT"), region="us-west-
 
 data = DataPlane(app, "FieldWatch-DataPlane", env=env)
 Access(app, "FieldWatch-Access", data=data, env=env)
+Scenes(app, "FieldWatch-Scenes", data=data, env=env)  # workstream 2
 Feed(app, "FieldWatch-Feed", data=data, env=env)  # workstream 13 (live feed)
 
 from stacks.agent import Agent  # workstream 7
