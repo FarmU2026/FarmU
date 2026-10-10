@@ -9,7 +9,7 @@ on:
     workflows: [ci]
     types: [completed]
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/30 * * * *"   # backstop only; the ci trigger above does the real work
   workflow_dispatch:
 
 permissions:
@@ -25,24 +25,35 @@ concurrency:
 jobs:
   merge:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      # Cheap first: only install and test when some PR could actually be merged (saves Actions minutes).
+      - id: candidates
+        run: |
+          n=$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --state open --json isDraft,labels \
+            --jq '[.[] | select(.isDraft | not) | select([.labels[].name] | (index("hold") or index("needs-human")) | not)] | length')
+          echo "count=$n" >> "$GITHUB_OUTPUT"
+          echo "candidate PRs: $n"
+      - if: steps.candidates.outputs.count != '0'
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - if: steps.candidates.outputs.count != '0'
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: |
             agent/requirements*.txt
             infra/requirements.txt
-      - uses: actions/setup-node@v4
+      - if: steps.candidates.outputs.count != '0'
+        uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - run: python -m pip install -r agent/requirements-dev.txt -r infra/requirements.txt
-      - run: |
+      - if: steps.candidates.outputs.count != '0'
+        run: |
+          python -m pip install -r agent/requirements-dev.txt -r infra/requirements.txt
           git config user.name "fieldwatch-automerge"
           git config user.email "automerge@users.noreply.github.com"
-      - run: python .github/scripts/automerge.py
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          python .github/scripts/automerge.py
