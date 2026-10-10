@@ -4,10 +4,10 @@ Pattern: agents-as-tools (https://strandsagents.com/docs/user-guide/concepts/mul
 The supervisor is the only agent with write tools, and every write tool interrupts for a YES.
 """
 from strands import Agent, tool
-from strands.models import BedrockModel
+from strands.models import BedrockModel, Model
 
 from . import tools as T
-from .config import MODEL_ID, REGION
+from . import config
 from .hooks import ToolTimeline
 from .schemas import SpecialistResponse
 
@@ -22,8 +22,13 @@ PLAIN_WORDS = (
 )
 
 
-def model() -> BedrockModel:
-    return BedrockModel(model_id=MODEL_ID, region_name=REGION, temperature=0.2)
+def model() -> Model:
+    """One place to pick the backend. See config.PROVIDER."""
+    if config.PROVIDER == "ollama":
+        from strands.models.ollama import OllamaModel
+
+        return OllamaModel(config.OLLAMA_HOST, model_id=config.OLLAMA_MODEL, temperature=0.2)
+    return BedrockModel(model_id=config.MODEL_ID, region_name=config.REGION, temperature=0.2)
 
 
 def _specialist(name: str, job: str, tools: list, timeline: ToolTimeline) -> Agent:
