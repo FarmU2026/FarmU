@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FieldWatch</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="styles.css">
+<style>
+  /* phone first: the phone panel comes before the dashboard on small screens */
+  #phoneCard { order: 3; } #dashCard { order: 4; }
+  @media (min-width: 1000px) { #phoneCard, #dashCard { order: 0; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>FieldWatch</h1>
+  <p id="tagline">Draw your fields, leave your number, and the farm texts you after every clear satellite pass.</p>
+</header>
+
+<main id="main">
+  <div class="col-left">
+    <section class="card" id="signup">
+      <div id="signupForm">
+        <h2>1. Your farm</h2>
+        <label for="farmer">Your name</label>
+        <input id="farmer" placeholder="Dad" autocomplete="name">
+        <label for="phone">Phone number (texts go here)</label>
+        <input id="phone" type="tel" placeholder="402 555 0100" autocomplete="tel">
+        <h2 style="margin-top:20px">2. Your fields</h2>
+        <p class="hint">Click the corners of a field on the map. Then name it and press Add field.</p>
+      </div>
+      <h2 id="mapTitle" class="hidden">Your fields</h2>
+      <div id="map"></div>
+      <div id="signupControls">
+        <div class="row">
+          <input id="fname" placeholder="What do you call this field? e.g. north pivot" style="flex:2; min-width:200px">
+          <select id="fcrop" style="flex:1; min-width:120px">
+            <option>corn</option><option>soybeans</option><option>wheat</option><option>milo</option><option>alfalfa</option>
+          </select>
+        </div>
+        <div class="row">
+          <button id="addField" disabled>Add field</button>
+          <button class="secondary" id="clearPts">Clear points</button>
+        </div>
+        <ul class="fields" id="fieldList"></ul>
+        <div class="row">
+          <button id="start" disabled>Start watching</button>
+        </div>
+        <p id="err" class="err"></p>
+      </div>
+    </section>
+
+    <section class="card hidden" id="live">
+      <h2>Live from the satellite</h2>
+      <p class="hint" id="checked"></p>
+      <div id="fieldsOut"></div>
+    </section>
+  </div>
+
+  <div class="col-right">
+    <section class="card hidden dash" id="dashCard" aria-live="polite">
+      <div class="dash-head">
+        <h2>What FieldWatch is checking</h2>
+        <span class="badge" id="feedBadge">Connecting</span>
+      </div>
+      <div class="chips" id="fieldChips"></div>
+      <div class="invtabs" id="invTabs"></div>
+      <div id="invBody">
+        <p class="hint">Nothing is being checked right now. Press ASK on the phone, or wait for the next clear satellite pass.</p>
+      </div>
+    </section>
+
+    <section class="card hidden" id="phoneCard">
+      <h2>Your phone</h2>
+      <p class="hint" id="smsStatus"></p>
+      <div class="phone" id="thread" role="log" aria-live="polite"></div>
+      <div class="row phone-actions">
+        <button id="btnAsk">ASK</button>
+        <button id="btnYes">YES</button>
+        <button class="secondary" id="btnNo">NO</button>
+        <button class="secondary" id="btnMore">MORE</button>
+      </div>
+      <form class="reply" id="replyForm">
+        <input id="replyText" placeholder="Type a reply" aria-label="Type a reply" autocomplete="off">
+        <button class="secondary" type="submit" id="btnSend">Send</button>
+      </form>
+      <div class="row"><button class="secondary" id="btnCheck" style="flex:1">Check satellite now</button></div>
+    </section>
+  </div>
+</main>
+
+<script src="config.js"></script>
+<script src="common.js"></script>
+<script src="realtime.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

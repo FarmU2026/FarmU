@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """FieldWatch CDK app (docs/decisions.md D2).
 
-One shared DataPlane stack (integrator deploys it) plus one stack per workstream, named
-FieldWatch-<Workstream>. Add your workstream's stack below; deploy only your own:
+Shared stacks (DataPlane, Access) plus one stack per subsystem, named FieldWatch-<Subsystem>.
+Register a new stack by adding ONE import and ONE line in the matching section below.
+Deploys run through the deploy workflow on main, or from Caleb's machine.
 
-    cdk deploy FieldWatch-Hazards
-
-The agent, Gateway and AgentCore Memory live in the AgentCore CLI project (agent/cloud/agentcore/),
-not here.
+The agent itself runs on AgentCore Runtime from the AgentCore CLI project (agent/cloud/agentcore/), not here.
 """
 import os
 
@@ -15,29 +13,35 @@ import aws_cdk as cdk
 
 from stacks.access import Access
 from stacks.api import Api
+from stacks.agent import Agent
+from stacks.context import Context
 from stacks.data_plane import DataPlane
 from stacks.feed import Feed
+from stacks.frontend import Frontend
+from stacks.scenes import Scenes
+from stacks.tools import Tools
 
 app = cdk.App()
 # Region is fixed: the CDK CLI defaults to us-east-1 when no AWS config is present, and us-east-1 is off limits (D3).
 env = cdk.Environment(account=os.getenv("CDK_DEFAULT_ACCOUNT"), region="us-west-2")
 
+# --- shared ---
 data = DataPlane(app, "FieldWatch-DataPlane", env=env)
 Access(app, "FieldWatch-Access", data=data, env=env)
-Api(app, "FieldWatch-Api", data=data, env=env)  # workstream 12 (web API)
-Feed(app, "FieldWatch-Feed", data=data, env=env)  # workstream 13 (live feed)
 
-from stacks.agent import Agent  # workstream 7
-Agent(app, "FieldWatch-Agent", data=data, env=env)
+# --- pipelines ---
+Scenes(app, "FieldWatch-Scenes", data=data, env=env)  # WS2 scene pipeline + replay
+context = Context(app, "FieldWatch-Context", data=data, env=env)  # WS15; context.state_machine for the web API
 
-# Workstream stacks go here, each receiving `data` for the shared bucket, tables and bus, e.g.:
-# from stacks.hazards import Hazards
-# Hazards(app, "FieldWatch-Hazards", data=data, env=env)          # workstream 3 (Kurt)
-# from stacks.notifications import Notifications
-# Notifications(app, "FieldWatch-Notifications", data=data, env=env)  # workstream 9 (Kurt)
-# from stacks.analysis import Analysis
-# Analysis(app, "FieldWatch-Analysis", data=data, env=env)        # workstreams 1-2
-# from stacks.tools import Tools
-# Tools(app, "FieldWatch-Tools", data=data, env=env)              # workstream 6 (Lambda targets for the Gateway)
+# --- agents and tools ---
+Tools(app, "FieldWatch-Tools", data=data, env=env)  # WS6 Gateway + tool Lambda
+Agent(app, "FieldWatch-Agent", data=data, env=env)  # WS7 session starter (agent itself: AgentCore CLI)
+
+# --- interaction ---
+Feed(app, "FieldWatch-Feed", data=data, env=env)  # WS13 live feed
+Api(app, "FieldWatch-Api", data=data, env=env)  # WS12 web API (HTTP API + Lambdas)
+Frontend(app, "FieldWatch-Frontend", env=env)  # WS14 web/ on S3 + CloudFront
+
+# Still to come: Hazards (WS3, Kurt), Notifications (WS9, Kurt).
 
 app.synth()

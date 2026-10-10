@@ -11,6 +11,7 @@ Runtime entrypoint (app.py) runs in the background: it wraps them with a Recorde
 """
 from __future__ import annotations
 
+import importlib
 import inspect
 import json
 import logging
@@ -67,7 +68,9 @@ def _gateway_tools():
     if config.TOOLS_BACKEND == "local":
         return None
     try:
-        from . import toolset  # workstream 6; may not be merged yet
+        # import_module, not `from . import toolset`: that form returns the package attribute once the
+        # submodule has been imported anywhere, so sys.modules can't make it fail (or swap it) at call time.
+        toolset = importlib.import_module(f"{__package__}.toolset")
     except ImportError:
         log.warning("FIELDWATCH_TOOLS_BACKEND=%s but fieldwatch.toolset is missing; using local tools", config.TOOLS_BACKEND)
         return None

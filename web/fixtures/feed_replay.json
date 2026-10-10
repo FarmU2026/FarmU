@@ -1,0 +1,359 @@
+[
+  {
+    "at_ms": 0,
+    "msg": {
+      "type": "scene_analyzed",
+      "ts": "2026-07-18T17:21:00Z",
+      "farm_id": "demo-farm",
+      "backend": "cloud",
+      "payload": {
+        "field": {
+          "farm_id": "demo-farm",
+          "field_id": "north-pivot"
+        },
+        "scene_id": "S2B_14TPM_20260718",
+        "date": "2026-07-18",
+        "status": "ok",
+        "max_score": 0.82,
+        "region_count": 1
+      }
+    }
+  },
+  {
+    "at_ms": 900,
+    "msg": {
+      "type": "field_status",
+      "ts": "2026-07-18T17:21:01Z",
+      "farm_id": "demo-farm",
+      "backend": "cloud",
+      "payload": {
+        "field_id": "north-pivot",
+        "status": "flagged",
+        "label": "ring pattern"
+      }
+    }
+  },
+  {
+    "at_ms": 1300,
+    "msg": {
+      "type": "field_status",
+      "ts": "2026-07-18T17:21:01Z",
+      "farm_id": "demo-farm",
+      "backend": "cloud",
+      "payload": {
+        "field_id": "johnson-quarter",
+        "status": "ok"
+      }
+    }
+  },
+  {
+    "at_ms": 2500,
+    "msg": {
+      "type": "investigation_step",
+      "ts": "2026-07-18T17:21:02Z",
+      "farm_id": "demo-farm",
+      "investigation_id": "inv-north-pivot-20260718",
+      "agent": "supervisor",
+      "backend": "cloud",
+      "payload": {
+        "seq": 1,
+        "step": "plan",
+        "text": "A ring on the outer edge of the north pivot looks weak. Checking what could cause it.",
+        "field": {
+          "farm_id": "demo-farm",
+          "field_id": "north-pivot"
+        }
+      }
+    }
+  },
+  {
+    "at_ms": 4000,
+    "msg": {
+      "type": "investigation_step",
+      "ts": "2026-07-18T17:21:03Z",
+      "farm_id": "demo-farm",
+      "investigation_id": "inv-north-pivot-20260718",
+      "agent": "imagery",
+      "backend": "cloud",
+      "payload": {
+        "seq": 2,
+        "step": "tool_call",
+        "text": "Looking at the shape of the weak area in the satellite image.",
+        "tool": "get_field_analysis",
+        "field": {
+          "farm_id": "demo-farm",
+          "field_id": "north-pivot"
+        }
+      }
+    }
+  },
+  {
+    "at_ms": 6000,
+    "msg": {
+      "type": "investigation_step",
+      "ts": "2026-07-18T17:21:04Z",
+      "farm_id": "demo-farm",
+      "investigation_id": "inv-north-pivot-20260718",
+      "agent": "imagery",
+      "backend": "cloud",
+      "payload": {
+        "seq": 3,
+        "step": "evidence",
+        "text": "The weak area is a ring on the outer edge, the path of the last span.",
+        "tool": "get_field_analysis",
+        "evidence": {
+          "evidence_id": "ev1",
+          "hypothesis": "pivot_failure",
+          "direction": "supports",
+          "weight_key": "ring_outer_edge",
+          "source": "get_field_analysis",
+          "value": {
+            "ring_score": 0.81
+          },
+          "reason": "The weak area is a ring on the outer edge, the path of the pivot's last span.",
+          "created_at": "2026-07-18T17:21:05Z"
+        }
+      }
+    }
+  },
+  {
+    "at_ms": 6200,
+    "msg": {
+      "type": "hypotheses_updated",
+      "ts": "2026-07-18T17:21:04Z",
+      "farm_id": "demo-farm",
+      "investigation_id": "inv-north-pivot-20260718",
+      "backend": "cloud",
+      "payload": {
+        "hypotheses": [
+          {
+            "condition": "pivot_failure",
+            "probability": 0.55,
+            "status": "likely"
+          },
+          {
+            "condition": "drought",
+            "probability": 0.15,
+            "status": "open"
+          },
+          {
+            "condition": "hail",
+            "probability": 0.1,
+            "status": "open"
+          },
+          {
+            "condition": "sandy_soil_water_stress",
+            "probability": 0.1,
+            "status": "open"
+          },
+          {
+            "condition": "disease_pest",
+            "probability": 0.1,
+            "status": "open"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "at_ms": 8500,
+    "msg": {
+      "type": "investigation_step",
+      "ts": "2026-07-18T17:21:06Z",
+      "farm_id": "demo-farm",
+      "investigation_id": "inv-north-pivot-20260718",
+      "agent": "environment",
+      "backend": "cloud",
+      "payload": {
+        "seq": 4,
+        "step": "evidence",
+        "text": "Checked rainfall since June 18: normal.",
+        "tool": "get_weather",
+        "evidence": {
+          "evidence_id": "ev2",
+          "hypothesis": "drought",
+          "direction": "refutes",
+          "weight_key": "rain_normal_30d",
+          "source": "get_weather",
+          "value": {
+            "rain_mm_30d": 81,
+            "normal_mm_30d": 76
+          },
+          "reason": "Rain over the last month was normal.",
+          "created_at": "2026-07-18T17:21:05Z"
+        }
+      }
+    }
+  },
+  {
+    "at_ms": 10500,
+    "msg": {
+      "type": "investigation_step",
+      "ts": "2026-07-18T17:21:08Z",
+      "farm_id": "demo-farm",
+      "investigation_id": "inv-north-pivot-20260718",
+      "agent": "environment",
+      "backend": "cloud",
+      "payload": {
+        "seq": 5,
+        "step": "evidence",
+        "text": "Checked radar for hail over the field in the last two weeks: none.",
+        "tool": "get_hail",
+        "evidence": {
+          "evidence_id": "ev3",
+          "hypothesis": "hail",
+          "direction": "refutes",
+          "weight_key": "no_hail_14d",
+          "source": "get_hail",
+          "value": {
+            "max_mm": 0
+          },
+          "reason": "Radar shows no hail over the field in the last two weeks.",
+          "created_at": "2026-07-18T17:21:05Z"
+        }
+      }
+    }
+  },
+  {
+    "at_ms": 12500,
+    "msg": {
+      "type": "investigation_step",
+      "ts": "2026-07-18T17:21:10Z",
+      "farm_id": "demo-farm",
+      "investigation_id": "inv-north-pivot-20260718",
+      "agent": "agronomy",
+      "backend": "cloud",
+      "payload": {
+        "seq": 6,
+        "step": "evidence",
+        "text": "Checked the soil: uniform silt loam, not sand.",
+        "tool": "get_soil_profile",
+        "evidence": {
+          "evidence_id": "ev4",
+          "hypothesis": "sandy_soil_water_stress",
+          "direction": "refutes",
+          "weight_key": "soil_uniform_silt",
+          "source": "get_soil_profile",
+          "value": {
+            "texture": "silt loam"
+          },
+          "reason": "The soil is uniform silt loam, not sand.",
+          "created_at": "2026-07-18T17:21:05Z"
+        }
+      }
+    }
+  },
+  {
+    "at_ms": 13000,
+    "msg": {
+      "type": "hypotheses_updated",
+      "ts": "2026-07-18T17:21:10Z",
+      "farm_id": "demo-farm",
+      "investigation_id": "inv-north-pivot-20260718",
+      "backend": "cloud",
+      "payload": {
+        "hypotheses": [
+          {
+            "condition": "pivot_failure",
+            "probability": 0.86,
+            "status": "likely"
+          },
+          {
+            "condition": "drought",
+            "probability": 0.03,
+            "status": "ruled_out"
+          },
+          {
+            "condition": "hail",
+            "probability": 0.02,
+            "status": "ruled_out"
+          },
+          {
+            "condition": "sandy_soil_water_stress",
+            "probability": 0.04,
+            "status": "ruled_out"
+          },
+          {
+            "condition": "disease_pest",
+            "probability": 0.05,
+            "status": "open"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "at_ms": 15000,
+    "msg": {
+      "type": "concluded",
+      "ts": "2026-07-18T17:21:12Z",
+      "farm_id": "demo-farm",
+      "investigation_id": "inv-north-pivot-20260718",
+      "backend": "cloud",
+      "payload": {
+        "investigation_id": "inv-north-pivot-20260718",
+        "field": {
+          "farm_id": "demo-farm",
+          "field_id": "north-pivot"
+        },
+        "diagnosis": {
+          "condition": "pivot_failure",
+          "summary": "A nozzle or tower on the outer span likely isn't watering."
+        },
+        "hypotheses": [
+          {
+            "condition": "pivot_failure",
+            "probability": 0.86,
+            "status": "likely"
+          },
+          {
+            "condition": "drought",
+            "probability": 0.03,
+            "status": "ruled_out"
+          },
+          {
+            "condition": "hail",
+            "probability": 0.02,
+            "status": "ruled_out"
+          },
+          {
+            "condition": "sandy_soil_water_stress",
+            "probability": 0.04,
+            "status": "ruled_out"
+          },
+          {
+            "condition": "disease_pest",
+            "probability": 0.05,
+            "status": "open"
+          }
+        ],
+        "impact": {
+          "affected_acres": 12.1,
+          "low_usd": 9000,
+          "high_usd": 14000,
+          "basis": "210 bu/ac x $4.20/bu x 12 ac"
+        },
+        "proposed_action": {
+          "action_type": "work_order",
+          "summary": "Check the outer span nozzles and end tower on the north pivot",
+          "assignee_person_id": "brother"
+        }
+      }
+    }
+  },
+  {
+    "at_ms": 16000,
+    "msg": {
+      "type": "message_out",
+      "ts": "2026-07-18T17:21:13Z",
+      "farm_id": "demo-farm",
+      "investigation_id": "inv-north-pivot-20260718",
+      "agent": "supervisor",
+      "backend": "cloud",
+      "payload": {
+        "message_id": "msg-001",
+        "body": "North pivot: the crop in a ring on the outer edge is stressed. Rain's been normal and it matches the pivot's path, so a nozzle or tower likely isn't watering. At risk if not fixed this week: $9,000-$14,000. Send your son a repair ticket? YES / NO / MORE"
+      }
+    }
+  }
+]
