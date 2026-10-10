@@ -46,6 +46,13 @@ def test_parse_start_and_resume_samples():
     assert isinstance(r, C.ResumeInvestigation) and r.text == "YES" and r.approval_id == "apr-001"
 
 
+def test_parse_unwraps_the_cli_prompt_envelope():
+    r = runtime_app.parse_request({"prompt": json.dumps(_resume_payload())})
+    assert isinstance(r, C.ResumeInvestigation)
+    with pytest.raises(ValueError):
+        runtime_app.parse_request({"prompt": "just chatting"})
+
+
 def test_parse_defaults_to_start():
     p = _start_payload()
     p.pop("action")

@@ -11,6 +11,7 @@ fw-investigations, so the caller (the session starter Lambda) never waits on the
 
 Set FIELDWATCH_RUNTIME_SYNC=1 to run inline and return the AgentStep instead (`agentcore dev`, local checks).
 """
+import json
 import os
 import threading
 
@@ -56,6 +57,11 @@ _running: dict[str, threading.Thread] = {}  # investigation_id -> its background
 
 def parse_request(payload) -> C.StartInvestigation | C.ResumeInvestigation:
     """Validate a payload as StartInvestigation or ResumeInvestigation. Raises ValueError / ValidationError."""
+    if isinstance(payload, dict) and set(payload) == {"prompt"} and isinstance(payload["prompt"], str):
+        try:  # `agentcore invoke '<json>'` wraps its argument as {"prompt": "<json>"}
+            payload = json.loads(payload["prompt"])
+        except ValueError:
+            raise ValueError("payload must be a JSON object") from None
     if not isinstance(payload, dict):
         raise ValueError("payload must be a JSON object")
     action = payload.get("action", "start")
