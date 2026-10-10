@@ -12,6 +12,7 @@ import os
 import aws_cdk as cdk
 
 from stacks.access import Access
+from stacks.api import Api
 from stacks.agent import Agent
 from stacks.context import Context
 from stacks.data_plane import DataPlane
@@ -38,8 +39,9 @@ Agent(app, "FieldWatch-Agent", data=data, env=env)  # WS7 session starter (agent
 
 # --- interaction ---
 Feed(app, "FieldWatch-Feed", data=data, env=env)  # WS13 live feed
+Api(app, "FieldWatch-Api", data=data, env=env)  # WS12 web API (HTTP API + Lambdas)
 Frontend(app, "FieldWatch-Frontend", env=env)  # WS14 web/ on S3 + CloudFront
 
-# Still to come: Hazards (WS3, Kurt), Notifications (WS9, Kurt), Api (WS12).
+# Still to come: Hazards (WS3, Kurt), Notifications (WS9, Kurt).
 
 app.synth()
