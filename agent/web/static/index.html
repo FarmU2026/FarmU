@@ -85,6 +85,7 @@
 
   <section class="card hidden" id="phoneCard">
     <h2>Your phone</h2>
+    <p class="hint" id="smsStatus"></p>
     <div class="phone" id="thread"></div>
     <div class="row">
       <button id="btnAsk">ASK</button>
@@ -152,7 +153,11 @@ function show(farm) {
       <p class="stat">Health ${s.health_index_median} (10% of field below ${s.health_index_low_10pct}) Â· weakest ${s.weakest_area} Â· ${Math.round(s.share_of_field_below_0_3*100)}% of field looks bare or stressed</p>
       <button class="secondary" onclick="ask('${f.id}')">Ask FieldWatch about this field</button></div>`;
   }).join('');
-  $('thread').innerHTML = (farm.thread || []).map(m => `<div class="msg ${m.who}">${esc(m.text)}${m.who !== 'agent' ? `<time>${m.at.slice(11,16)}</time>` : ''}</div>`).join('');
+  $('thread').innerHTML = (farm.thread || []).map(m => {
+    const badge = m.sms ? (m.sms.ok ? ` · texted via ${m.sms.provider}` : ` · not texted (${esc(m.sms.detail || m.sms.provider)})`) : '';
+    return `<div class="msg ${m.who}">${esc(m.text)}${m.who !== 'agent' ? `<time>${m.at.slice(11,16)}${badge}</time>` : ''}</div>`;
+  }).join('');
+  if (farm.muted) $('smsStatus').textContent = 'Texts are paused (farmer replied STOP). Reply START to resume.';
   $('thread').scrollTop = $('thread').scrollHeight;
   for (const b of ['btnAsk','btnYes','btnNo','btnMore','btnCheck']) $(b).disabled = busy;
 }
@@ -170,6 +175,12 @@ $('btnYes').onclick = () => call(`/api/farms/${farmId}/reply`, {text:'YES'});
 $('btnNo').onclick = () => call(`/api/farms/${farmId}/reply`, {text:'NO'});
 $('btnMore').onclick = () => call(`/api/farms/${farmId}/reply`, {text:'MORE'});
 $('btnCheck').onclick = () => call(`/api/farms/${farmId}/check`);
+
+fetch('/api/status').then(r => r.json()).then(st => {
+  $('smsStatus').textContent = st.sms_provider === 'none'
+    ? 'No SMS provider configured: this panel is the only copy of the texts. Set TWILIO_* in agent/.env to send real ones.'
+    : `Real texts go out via ${st.sms_provider}${st.sms_from ? ' from ' + st.sms_from : ''}. Reply from your phone with ASK, YES, NO, MORE or STOP.`;
+});
 
 // reopen a farm from the URL hash
 if (location.hash.length > 1) { farmId = location.hash.slice(1); refresh().then(() => setInterval(refresh, 15000)); }

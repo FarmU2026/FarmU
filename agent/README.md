@@ -39,8 +39,22 @@ start http://localhost:8000
 5. A background thread re-checks the catalog every 10 minutes; a new pass becomes a new text.
    **Check satellite now** forces a check.
 
-State lives in `agent/data/` (gitignored), one JSON per farm keyed by phone number. Real SMS is
-not wired yet; the phone panel is the mirror the demo uses.
+State lives in `agent/data/` (gitignored), one JSON per farm keyed by phone number.
+
+### Real texts
+
+Every message FieldWatch posts to the phone panel is also sent as an SMS to the number the farmer
+signed up with (`fieldwatch/sms.py`). Put Twilio credentials in `.env` and it is two-way:
+
+1. https://console.twilio.com, free trial, get a trial number, **verify** each phone you will text
+   (Phone Numbers > Verified Caller IDs). Trial texts carry a short "Sent from a Twilio trial" prefix.
+2. In `.env`: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM=+1...`. Restart the server.
+3. Reply from the phone with **ASK**, **ASK <field name>**, **YES**, **NO**, **MORE**, **STOP**.
+   Replies are polled from Twilio every 5s, so no public URL is needed. With ngrok, point the
+   number's inbound webhook at `/sms/inbound` instead.
+
+One-way fallbacks: `TEXTBELT_KEY=textbelt` (one free text a day, no account) or IAM keys plus
+`FIELDWATCH_SMS=sns`. The Bedrock API key cannot send SMS; SNS needs real IAM keys.
 
 ## Models and cost
 
@@ -74,8 +88,9 @@ for anything that exercises the agents.
 1. **Account**: https://aws.amazon.com/free, Create account, choose the **free plan**.
    Needs a card and phone verification. The $100 credit appears under Billing > Credits.
 2. **Extra $100**: complete the five onboarding tasks shown on the console home page.
-3. **Model access**: Console > Amazon Bedrock > Model access > enable Claude Haiku 4.5 and
-   Claude Sonnet 4.5 (and Nova 2 Sonic if doing voice). Region us-west-2.
+3. **Model access**: Console > Amazon Bedrock > Model catalog > any Claude model > submit the
+   one-time Anthropic use-case form (done for this account), then Bedrock > API keys > generate a
+   short-term key (12 h, one region) and paste it into `agent/.env`.
 4. **Access keys**: Console > IAM > Users > Create user `hackathon` > attach
    AdministratorAccess (hackathon only) > Security credentials > Create access key > CLI.
 5. **Budget alarm**: Console > Billing > Budgets > create a $50 alert so a loop can't burn the credits.

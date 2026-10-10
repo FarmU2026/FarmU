@@ -11,6 +11,7 @@ question lands in the thread, and YES / NO resumes the paused agent.
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import time
@@ -18,12 +19,12 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from fieldwatch import config, imagery
+from fieldwatch import config, imagery, sms
 from fieldwatch.investigation import reply as agent_reply
 from fieldwatch.investigation import start as agent_start
 
@@ -90,7 +91,12 @@ def save(farm: dict) -> None:
 
 
 def post(farm: dict, who: str, text: str, **extra) -> None:
-    farm.setdefault("thread", []).append({"at": datetime.now().isoformat(timespec="seconds"), "who": who, "text": text, **extra})
+    """Append to the farm's thread. Anything FieldWatch says to the farmer also goes out as a real
+    text (agent step lines are web-only). The send result is kept on the entry so the UI can show it."""
+    entry = {"at": datetime.now().isoformat(timespec="seconds"), "who": who, "text": text, **extra}
+    if who == "fieldwatch" and extra.get("kind") != "step" and not farm.get("muted"):
+        entry["sms"] = sms.send(farm["phone"], text)
+    farm.setdefault("thread", []).append(entry)
 
 
 # ---------- imagery ----------
@@ -197,6 +203,87 @@ def farmer_reply(farm_id: str, text: str) -> dict:
         return farm
 
 
+def _more(farm: dict) -> str:
+    """Reply MORE: the detail behind the last diagnosis, or the latest numbers if there is none."""
+    if farm.get("diagnoses"):
+        d = farm["diagnoses"][-1]
+        ruled = ", ".join(d.get("ruled_out") or []) or "nothing yet"
+        return (f"{d['field_name']}, {d['where']}. {d['how_sure'].capitalize()}. Ruled out: {ruled}. "
+                f"To do: {d['action_detail']}")
+    parts = []
+    for f in farm["fields"]:
+        st = f.get("stats")
+        if st:
+            parts.append(f"{f['name']}: health {st['health_index_median']:.2f}, {st['share_of_field_below_0_3'] * 100:.0f}% of the field weak, weakest {st['weakest_area']}")
+    return " | ".join(parts) or "No satellite pass yet. Reply ASK once one arrives."
+
+
+def handle_text(farm_id: str, text: str) -> dict:
+    """Every farmer message, whether from the web panel or a real phone, comes through here."""
+    t = text.strip()
+    up = t.upper()
+    if up in ("STOP", "UNSUBSCRIBE", "QUIT"):
+        with LOCK:
+            farm = load(farm_id)
+            post(farm, "farmer", t)
+            farm["muted"] = True
+            post(farm, "fieldwatch", "Okay, no more texts. Reply START to turn them back on.", kind="step")
+            save(farm)
+            return farm
+    if up in ("START", "UNSTOP"):
+        with LOCK:
+            farm = load(farm_id)
+            farm["muted"] = False
+            post(farm, "farmer", t)
+            post(farm, "fieldwatch", "Texts are back on.")
+            save(farm)
+            return farm
+    if up == "ASK" or up.startswith("ASK "):
+        farm = load(farm_id)
+        want = t[4:].strip().lower()
+        field = next((f for f in farm["fields"] if want and want in (f["id"], f["name"].lower())), farm["fields"][0])
+        return investigate(farm_id, field["id"])
+    if up == "MORE":
+        with LOCK:
+            farm = load(farm_id)
+            post(farm, "farmer", t)
+            post(farm, "fieldwatch", _more(farm))
+            save(farm)
+            return farm
+    return farmer_reply(farm_id, t)
+
+
+def inbound_sms(from_phone: str, body: str) -> None:
+    """A real text arrived. Route it to the farm signed up with that number."""
+    farm_id = sms.farm_id_for(from_phone)
+    if not _path(farm_id).exists():
+        sms.send(from_phone, "FieldWatch here. This number is not signed up yet; add your fields at the FieldWatch page first.")
+        return
+    try:
+        handle_text(farm_id, body)
+    except Exception as e:
+        with LOCK:
+            farm = load(farm_id)
+            post(farm, "fieldwatch", f"Sorry, something went wrong on my end: {str(e)[:120]}")
+            save(farm)
+
+
+def sms_poller() -> None:
+    """Without a public URL, ask Twilio for new replies every few seconds."""
+    poller = sms.TwilioPoller()
+    while True:
+        try:
+            for frm, body in poller.poll():
+                inbound_sms(frm, body)
+        except Exception as e:
+            print("sms poll:", e)
+        time.sleep(5)
+
+
+if sms.provider() == "twilio" and os.getenv("FIELDWATCH_SMS_POLL", "1") != "0":
+    threading.Thread(target=sms_poller, daemon=True).start()
+
+
 # ---------- routes ----------
 
 
@@ -259,11 +346,22 @@ def ask(farm_id: str, field_id: str):
 
 @app.post("/api/farms/{farm_id}/reply")
 def reply(farm_id: str, body: ReplyIn):
-    text = body.text.strip()
-    if text.upper() == "ASK":
-        farm = load(farm_id)
-        return investigate(farm_id, farm["fields"][0]["id"])
-    return farmer_reply(farm_id, text)
+    return handle_text(farm_id, body.text)
+
+
+@app.post("/sms/inbound")
+async def twilio_inbound(request: Request):
+    """Point the Twilio number's 'A message comes in' webhook here (public URL, e.g. ngrok)."""
+    parsed = sms.parse_twilio_webhook(dict(await request.form()))
+    if parsed:
+        threading.Thread(target=inbound_sms, args=parsed, daemon=True).start()
+    return Response("<Response></Response>", media_type="application/xml")
+
+
+@app.get("/api/status")
+def status():
+    return {"sms_provider": sms.provider(), "sms_from": sms.TWILIO_FROM if sms.provider() == "twilio" else None,
+            "model": config.MODEL_ID if config.PROVIDER == "bedrock" else f"ollama:{config.OLLAMA_MODEL}"}
 
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

@@ -36,7 +36,9 @@ class Diagnosis(BaseModel):
             "insurance_notice": ("Draft a note to your insurance agent?", "Insurance note drafted."),
             "none": ("No action needed.", "No action needed."),
         }.get(self.recommended_action, ("Want me to act on this?", "Done."))
-        if approved is None:
+        if self.recommended_action == "none":
+            tail = "No action needed. Reply MORE for details."
+        elif approved is None:
             tail = f"{ask[0]} YES / NO / MORE"
         elif approved:
             tail = f"{ask[1]} Reply MORE for details."
