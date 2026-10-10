@@ -51,7 +51,8 @@ def build_specialists(timeline: ToolTimeline) -> list:
     """Each specialist becomes a tool the supervisor can call."""
     imagery = _specialist(
         "imagery",
-        "You read the satellite pass. Call look_at_field first and describe what you SEE in the two images: "
+        "You read the satellite pass. You MUST call look_at_field with the field id before answering, every time. "
+        "Describe what you SEE in the two images: "
         "where the weak area is and its shape. Rings and arcs mean irrigation, straight edges mean weather or "
         "a sprayer pass, irregular blotches mean soil, pests or disease. Use get_scene_analysis for the "
         "pre-computed pattern if the live image is unavailable or ambiguous. Note the scene date.",
@@ -91,8 +92,8 @@ def build_specialists(timeline: ToolTimeline) -> list:
 
 SUPERVISOR_PROMPT = f"""You are FieldWatch, watching a family farm's fields from satellite.
 
-For the field you are asked about:
-1. Ask the imagery specialist what the stress pattern looks like.
+For the field you are asked about (call list_fields once to get its id, then use the id everywhere):
+1. Ask the imagery specialist what the stress pattern looks like. Include the field id in the question.
 2. Form 2-3 hypotheses (e.g. irrigation failure, hail, drought, sandy soil, disease).
 3. Ask the weather and soil specialists to test them. Rule hypotheses out explicitly.
 4. Use estimate_loss for a dollar range on the affected acres.

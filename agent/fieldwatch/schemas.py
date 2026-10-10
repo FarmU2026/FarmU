@@ -24,17 +24,27 @@ class Diagnosis(BaseModel):
     )
     action_detail: str = Field(description="What the person doing the action should check or do")
 
-    def to_text(self) -> str:
-        """The SMS. Under ~300 chars, five things: what, where, why, stake, what to do."""
+    def to_text(self, approved: bool | None = None) -> str:
+        """The SMS. Under ~300 chars, five things: what, where, why, stake, what to do.
+
+        approved=None: the action is still a question. True/False: the farmer already answered.
+        """
         ask = {
-            "repair_work_order": "Send a repair ticket?",
-            "scouting_pin": "Send a scouting pin?",
-            "request_photo": "Can you snap a leaf photo?",
-            "insurance_notice": "Draft a note to your insurance agent?",
-            "none": "No action needed.",
-        }[self.recommended_action]
+            "repair_work_order": ("Send a repair ticket?", "Repair ticket sent."),
+            "scouting_pin": ("Send a scouting pin?", "Scouting pin sent."),
+            "request_photo": ("Can you snap a leaf photo?", "Photo link sent."),
+            "insurance_notice": ("Draft a note to your insurance agent?", "Insurance note drafted."),
+            "none": ("No action needed.", "No action needed."),
+        }.get(self.recommended_action, ("Want me to act on this?", "Done."))
+        if approved is None:
+            tail = f"{ask[0]} YES / NO / MORE"
+        elif approved:
+            tail = f"{ask[1]} Reply MORE for details."
+        else:
+            tail = "No action taken. Reply MORE for details."
+        what = self.what.rstrip(".")
+        why = self.why.rstrip(".")
         return (
-            f"{self.field_name}: {self.what} {self.why} "
-            f"At risk if not fixed: ${self.dollars_low:,}-${self.dollars_high:,}. "
-            f"{ask} YES / NO / MORE"
+            f"{self.field_name}: {what}. {why}. "
+            f"At risk if not fixed: ${self.dollars_low:,}-${self.dollars_high:,}. {tail}"
         )

@@ -1,7 +1,8 @@
-__pycache__/
 *.pyc
-.venv/
-.env
-.bedrock_agentcore.yaml
 .agentcore/
+.bedrock_agentcore.yaml
+.env
+.venv/
+__pycache__/
+data/
 sessions/

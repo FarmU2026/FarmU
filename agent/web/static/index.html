@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FieldWatch</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root { --bg:#f6f5f0; --ink:#1d1d1b; --muted:#6b6b65; --line:#dcdad2; --green:#2f7d32; --card:#fff; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:18px/1.45 system-ui, sans-serif; color:var(--ink); background:var(--bg); }
+  header { padding:16px; border-bottom:1px solid var(--line); background:var(--card); }
+  header h1 { margin:0; font-size:22px; }
+  header p { margin:4px 0 0; color:var(--muted); font-size:15px; }
+  main { display:grid; grid-template-columns:1fr; gap:16px; padding:16px; max-width:1200px; margin:0 auto; }
+  @media (min-width: 900px) { main { grid-template-columns: 1.3fr 1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .card h2 { margin:0 0 12px; font-size:18px; }
+  label { display:block; font-size:15px; color:var(--muted); margin:10px 0 4px; }
+  input, select { width:100%; font:inherit; padding:12px; border:1px solid var(--line); border-radius:8px; }
+  button { font:inherit; font-weight:600; padding:12px 16px; min-height:48px; border:0; border-radius:8px; cursor:pointer; background:var(--green); color:#fff; }
+  button.secondary { background:#e9e8e1; color:var(--ink); }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  #map { height:420px; border-radius:8px; border:1px solid var(--line); }
+  .hint { font-size:15px; color:var(--muted); margin:8px 0 0; }
+  ul.fields { list-style:none; padding:0; margin:8px 0 0; }
+  ul.fields li { padding:6px 0; border-top:1px solid var(--line); display:flex; justify-content:space-between; }
+  .field { margin-top:16px; }
+  .field h3 { margin:0 0 6px; font-size:17px; }
+  .imgs { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .imgs img { width:100%; border-radius:8px; border:1px solid var(--line); image-rendering:pixelated; }
+  .imgs small { display:block; color:var(--muted); font-size:13px; }
+  .stat { font-size:15px; color:var(--muted); }
+  .phone { background:#111; color:#eee; border-radius:24px; padding:16px; max-height:560px; overflow:auto; }
+  .msg { max-width:85%; padding:10px 14px; border-radius:16px; margin:6px 0; font-size:16px; white-space:pre-wrap; }
+  .msg.fieldwatch { background:#2b2b2b; }
+  .msg.farmer { background:#2f7d32; margin-left:auto; }
+  .msg.agent { background:transparent; color:#9a9a9a; font-size:13px; padding:2px 14px; margin:0; }
+  .msg time { display:block; font-size:11px; color:#888; margin-top:2px; }
+  .hidden { display:none; }
+  #err { color:#b00020; font-size:15px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>FieldWatch</h1>
+  <p>Draw your fields, leave your number, and the farm texts you after every clear satellite pass.</p>
+</header>
+
+<main>
+  <section class="card" id="signup">
+    <h2>1. Your farm</h2>
+    <label for="farmer">Your name</label>
+    <input id="farmer" placeholder="Dad">
+    <label for="phone">Phone number (texts go here)</label>
+    <input id="phone" type="tel" placeholder="402 555 0100">
+
+    <h2 style="margin-top:20px">2. Your fields</h2>
+    <p class="hint">Click the corners of a field on the map. Then name it and press Add field.</p>
+    <div id="map"></div>
+    <div class="row">
+      <input id="fname" placeholder="What do you call this field? e.g. north pivot" style="flex:2; min-width:200px">
+      <select id="fcrop" style="flex:1; min-width:120px">
+        <option>corn</option><option>soybeans</option><option>wheat</option><option>milo</option><option>alfalfa</option>
+      </select>
+    </div>
+    <div class="row">
+      <button id="addField" disabled>Add field</button>
+      <button class="secondary" id="clearPts">Clear points</button>
+    </div>
+    <ul class="fields" id="fieldList"></ul>
+
+    <div class="row">
+      <button id="start" disabled>Start watching</button>
+    </div>
+    <p id="err"></p>
+  </section>
+
+  <section class="card hidden" id="live">
+    <h2>Live from the satellite</h2>
+    <p class="hint" id="checked"></p>
+    <div id="fieldsOut"></div>
+  </section>
+
+  <section class="card hidden" id="phoneCard">
+    <h2>Your phone</h2>
+    <div class="phone" id="thread"></div>
+    <div class="row">
+      <button id="btnAsk">ASK</button>
+      <button id="btnYes">YES</button>
+      <button class="secondary" id="btnNo">NO</button>
+      <button class="secondary" id="btnMore">MORE</button>
+      <button class="secondary" id="btnCheck">Check satellite now</button>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let farmId = null, pts = [], markers = [], poly = null, fields = [], busy = false;
+
+// --- map ---
+const map = L.map('map').setView([42.16, -96.54], 13);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  attribution: 'Esri World Imagery', maxZoom: 19 }).addTo(map);
+map.on('click', e => {
+  pts.push([e.latlng.lat, e.latlng.lng]);
+  markers.push(L.circleMarker(e.latlng, {radius:5, color:'#ffeb3b'}).addTo(map));
+  if (poly) map.removeLayer(poly);
+  poly = L.polygon(pts, {color:'#ffeb3b', weight:2}).addTo(map);
+  $('addField').disabled = pts.length < 3;
+});
+$('clearPts').onclick = () => { pts = []; markers.forEach(m => map.removeLayer(m)); markers = []; if (poly) map.removeLayer(poly); poly = null; $('addField').disabled = true; };
+$('addField').onclick = () => {
+  const name = $('fname').value.trim() || `field ${fields.length + 1}`;
+  fields.push({ name, crop: $('fcrop').value, polygon: pts });
+  L.polygon(pts, {color:'#4caf50', weight:2, fillOpacity:.15}).bindTooltip(name, {permanent:true}).addTo(map);
+  $('clearPts').click(); $('fname').value = '';
+  $('fieldList').innerHTML = fields.map(f => `<li><span>${f.name}</span><span>${f.crop}</span></li>`).join('');
+  $('start').disabled = false;
+};
+
+// --- signup ---
+$('start').onclick = async () => {
+  $('err').textContent = ''; $('start').disabled = true; $('start').textContent = 'Pulling the latest satellite pass...';
+  try {
+    const r = await fetch('/api/farms', { method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ phone: $('phone').value, farmer: $('farmer').value || 'Farmer', fields }) });
+    if (!r.ok) throw new Error(await r.text());
+    const farm = await r.json();
+    farmId = farm.farm_id;
+    location.hash = farmId;
+    show(farm);
+    setInterval(refresh, 15000);
+  } catch (e) { $('err').textContent = e.message; $('start').disabled = false; $('start').textContent = 'Start watching'; }
+};
+
+// --- live view ---
+function show(farm) {
+  $('signup').classList.add('hidden'); $('live').classList.remove('hidden'); $('phoneCard').classList.remove('hidden');
+  $('checked').textContent = farm.last_checked ? `Last checked the catalog ${farm.last_checked.replace('T',' ')}. Checks again every 10 minutes.` : '';
+  $('fieldsOut').innerHTML = farm.fields.map(f => {
+    const s = f.stats; const v = Date.now();
+    if (!s) return `<div class="field"><h3>${f.name}</h3><p class="stat">No clear pass yet.</p></div>`;
+    return `<div class="field"><h3>${f.name} <span class="stat">· ${f.crop} · pass ${s.scene_date}</span></h3>
+      <div class="imgs">
+        <div><img src="/api/farms/${farm.farm_id}/fields/${f.id}/truecolor.png?v=${v}"><small>What the satellite sees</small></div>
+        <div><img src="/api/farms/${farm.farm_id}/fields/${f.id}/health.png?v=${v}"><small>Crop health: green strong, brown weak</small></div>
+      </div>
+      <p class="stat">Health ${s.health_index_median} (10% of field below ${s.health_index_low_10pct}) · weakest ${s.weakest_area} · ${Math.round(s.share_of_field_below_0_3*100)}% of field looks bare or stressed</p>
+      <button class="secondary" onclick="ask('${f.id}')">Ask FieldWatch about this field</button></div>`;
+  }).join('');
+  $('thread').innerHTML = (farm.thread || []).map(m => `<div class="msg ${m.who}">${esc(m.text)}${m.who !== 'agent' ? `<time>${m.at.slice(11,16)}</time>` : ''}</div>`).join('');
+  $('thread').scrollTop = $('thread').scrollHeight;
+  for (const b of ['btnAsk','btnYes','btnNo','btnMore','btnCheck']) $(b).disabled = busy;
+}
+const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+async function refresh() { if (!farmId || busy) return; const r = await fetch(`/api/farms/${farmId}`); if (r.ok) show(await r.json()); }
+async function call(url, body) {
+  busy = true; show(await (await fetch(`/api/farms/${farmId}`)).json());
+  try { const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: body ? JSON.stringify(body) : null });
+        if (!r.ok) alert(await r.text()); else show(await r.json()); }
+  finally { busy = false; refresh(); }
+}
+window.ask = fid => call(`/api/farms/${farmId}/fields/${fid}/ask`);
+$('btnAsk').onclick = () => call(`/api/farms/${farmId}/reply`, {text:'ASK'});
+$('btnYes').onclick = () => call(`/api/farms/${farmId}/reply`, {text:'YES'});
+$('btnNo').onclick = () => call(`/api/farms/${farmId}/reply`, {text:'NO'});
+$('btnMore').onclick = () => call(`/api/farms/${farmId}/reply`, {text:'MORE'});
+$('btnCheck').onclick = () => call(`/api/farms/${farmId}/check`);
+
+// reopen a farm from the URL hash
+if (location.hash.length > 1) { farmId = location.hash.slice(1); refresh().then(() => setInterval(refresh, 15000)); }
+</script>
+</body>
+</html>

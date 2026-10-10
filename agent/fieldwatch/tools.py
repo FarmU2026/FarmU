@@ -6,16 +6,36 @@ Read tools return facts from fixtures today; swap the bodies for real APIs
 Write tools pause the agent with a Strands interrupt until a human says YES.
 """
 import json
-from datetime import date
+from datetime import date, timedelta
 
+import requests
 from strands import tool
 from strands.types.tools import ToolContext, ToolResult
 
-from .config import FIXTURES
+from . import config
+
+CROP_DEFAULTS = {  # expected yield (bu/ac) and price ($/bu) when the farmer gave none
+    "corn": (205, 4.20),
+    "soybeans": (62, 10.50),
+    "wheat": (55, 5.80),
+    "milo": (110, 4.00),
+    "alfalfa": (5, 180.0),
+}
 
 
 def _farm() -> dict:
-    return json.loads((FIXTURES / "demo_farm.json").read_text())
+    """Read the farm file at call time, so the web UI can point at a different farm per request."""
+    return json.loads(config.FARM_FILE.read_text())
+
+
+def _centroid(f: dict) -> tuple[float, float]:
+    """(lat, lon) from the polygon or bbox."""
+    if f.get("polygon"):
+        lons = [p[0] for p in f["polygon"]]
+        lats = [p[1] for p in f["polygon"]]
+        return sum(lats) / len(lats), sum(lons) / len(lons)
+    w, s_, e, n = f["bbox"]
+    return (s_ + n) / 2, (w + e) / 2
 
 
 def _field(field_id: str) -> dict:
@@ -31,14 +51,8 @@ def _field(field_id: str) -> dict:
 @tool
 def list_fields() -> list[dict]:
     """List every field on the farm with its id, the name the farmer uses, crop and acres."""
-    return [{k: f[k] for k in ("id", "name", "crop", "acres", "irrigation")} for f in _farm()["fields"]]
-
-
-@tool
-def get_scene_analysis(field_id: str) -> dict:
-    """Latest satellite pass for a field: the stress pattern seen, how far crop health dropped, and the date."""
-    f = _field(field_id)
-    return {"field": f["name"], "irrigation": f["irrigation"], **f["latest_scan"]}
+    keys = ("id", "name", "crop", "acres", "irrigation")
+    return [{k: f.get(k, "unknown") for k in keys} for f in _farm()["fields"]]
 
 
 @tool
@@ -46,20 +60,23 @@ def look_at_field(field_id: str) -> ToolResult:
     """Pull the latest cloud-free satellite pass over a field and LOOK at it.
 
     Returns two images (true color, then a crop-health heatmap where green is vigorous and brown is
-    bare or stressed) plus summary numbers. Use this to describe the shape and location of any
-    problem area. Scenes are 2-5 days apart, so the date matters.
+    bare or stressed) plus summary numbers. Pixels outside the field boundary are dimmed. Use this to
+    describe the shape and location of any problem area. Scenes are 2-5 days apart, so the date matters.
     """
     from . import imagery  # heavy imports stay off the fast path
 
     f = _field(field_id)
     try:
-        view = imagery.look(tuple(f["bbox"]))
+        poly = [tuple(p) for p in f["polygon"]] if f.get("polygon") else None
+        bbox = tuple(f["bbox"]) if f.get("bbox") else imagery.polygon_bbox(poly)
+        view = imagery.look(bbox, poly)
     except Exception as e:  # network, no scene, etc.
         return {"status": "error", "content": [{"text": f"could not fetch imagery for {f['name']}: {e}"}]}
     return {
         "status": "success",
         "content": [
-            {"text": f"Latest clear pass over the {f['name']} ({f['crop']}, {f['irrigation']}). "
+            {"text": f"Latest clear pass over the {f['name']} ({f.get('crop', 'crop')}, "
+                     f"{f.get('irrigation', 'irrigation unknown')}). "
                      f"Image 1 is true color, image 2 is crop health. Numbers: {json.dumps(view.stats)}"},
             {"image": {"format": "png", "source": {"bytes": view.truecolor_png}}},
             {"image": {"format": "png", "source": {"bytes": view.health_png}}},
@@ -68,16 +85,58 @@ def look_at_field(field_id: str) -> ToolResult:
 
 
 @tool
-def get_weather(field_id: str) -> dict:
-    """Last 30 days of weather at a field: rain vs normal, hail reports, max temperature."""
+def get_scene_analysis(field_id: str) -> dict:
+    """Pre-computed analysis of the latest satellite pass, if the pipeline has run for this field."""
     f = _field(field_id)
-    return {"field": f["name"], **f["weather_30d"]}
+    if not f.get("latest_scan"):
+        return {"field": f["name"], "note": "no pre-computed analysis on file; use look_at_field"}
+    return {"field": f["name"], "irrigation": f.get("irrigation", "unknown"), **f["latest_scan"]}
+
+
+@tool
+def get_weather(field_id: str) -> dict:
+    """Last 30 days of weather at a field from Open-Meteo: daily rain, max temperature, totals vs a normal."""
+    f = _field(field_id)
+    if f.get("weather_30d"):  # fixture farms carry canned weather
+        return {"field": f["name"], **f["weather_30d"]}
+    lat, lon = _centroid(f)
+    end = date.today() - timedelta(days=2)  # archive lags a couple of days
+    start = end - timedelta(days=30)
+    try:
+        resp = requests.get(
+            "https://archive-api.open-meteo.com/v1/archive",
+            params={
+                "latitude": lat, "longitude": lon,
+                "start_date": start.isoformat(), "end_date": end.isoformat(),
+                "daily": "precipitation_sum,temperature_2m_max",
+                "precipitation_unit": "inch", "temperature_unit": "fahrenheit", "timezone": "America/Chicago",
+            },
+            timeout=20,
+        ).json()["daily"]
+    except Exception as e:
+        return {"field": f["name"], "error": f"weather unavailable: {e}"}
+    rain = [x or 0 for x in resp["precipitation_sum"]]
+    temps = [x for x in resp["temperature_2m_max"] if x is not None]
+    return {
+        "field": f["name"],
+        "period": f"{start} to {end}",
+        "rain_in": round(sum(rain), 2),
+        "normal_rain_in_30d": 3.0,
+        "days_with_rain": sum(1 for x in rain if x >= 0.1),
+        "biggest_rain_day_in": round(max(rain), 2),
+        "max_temp_f": max(temps) if temps else None,
+        "days_over_95f": sum(1 for t in temps if t >= 95),
+        "hail_reported": None,
+        "source": "open-meteo.com archive",
+    }
 
 
 @tool
 def get_soil(field_id: str) -> dict:
     """Soil survey for a field: soil type, drainage, and any notes on variability within the field."""
     f = _field(field_id)
+    if not f.get("soil"):
+        return {"field": f["name"], "note": "no soil survey on file for this field yet"}
     return {"field": f["name"], **f["soil"]}
 
 
@@ -85,7 +144,8 @@ def get_soil(field_id: str) -> dict:
 def estimate_loss(field_id: str, affected_acres: float, yield_loss_fraction: float) -> dict:
     """Dollar impact if nothing is done. yield_loss_fraction is 0-1 for the affected acres only."""
     f = _field(field_id)
-    per_acre = f["expected_yield_bu_ac"] * f["price_per_bu"]
+    y_def, p_def = CROP_DEFAULTS.get(f.get("crop", "").lower(), (150, 5.0))
+    per_acre = f.get("expected_yield_bu_ac", y_def) * f.get("price_per_bu", p_def)
     mid = affected_acres * yield_loss_fraction * per_acre
     return {"field": f["name"], "low": int(mid * 0.7), "high": int(mid * 1.3), "per_acre_value": int(per_acre)}
 

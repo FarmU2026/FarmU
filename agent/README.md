@@ -20,6 +20,28 @@ Strands features on show: agents-as-tools, interrupts (human-in-the-loop), hooks
 structured output, session management, per-invocation limits. Next up: Graph for the
 investigation, bidirectional streaming (Nova Sonic) for Grandpa's phone call.
 
+## Web UI (sign up a farm, get live updates)
+
+```powershell
+cd agent
+copy .env.example .env      # then paste the Bedrock API key into .env
+python -m uvicorn web.server:app --port 8000
+start http://localhost:8000
+```
+
+1. Type a name and phone number.
+2. Click the corners of a field on the satellite map, name it, press **Add field**. Repeat.
+3. **Start watching**: the latest cloud-free Sentinel-2 pass is pulled, clipped to each boundary,
+   and the first "new satellite pass" text lands in the phone panel.
+4. **ASK** (or "Ask FieldWatch about this field") runs the Strands investigation live. The agent's
+   steps stream into the phone as grey lines; its approval question arrives as a text; **YES** / **NO**
+   resumes the paused agent and the diagnosis follows.
+5. A background thread re-checks the catalog every 10 minutes; a new pass becomes a new text.
+   **Check satellite now** forces a check.
+
+State lives in `agent/data/` (gitignored), one JSON per farm keyed by phone number. Real SMS is
+not wired yet; the phone panel is the mirror the demo uses.
+
 ## Models and cost
 
 No sponsor code, so the budget is the AWS free-tier credit: $100 at sign-up, plus $20 for each
