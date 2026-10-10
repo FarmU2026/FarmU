@@ -51,9 +51,11 @@ def build_specialists(timeline: ToolTimeline) -> list:
     """Each specialist becomes a tool the supervisor can call."""
     imagery = _specialist(
         "imagery",
-        "You read the satellite pass. Describe the shape of the stressed area: rings and arcs mean irrigation, "
-        "straight edges mean weather or a sprayer pass, irregular blotches mean soil, pests or disease.",
-        [T.list_fields, T.get_scene_analysis],
+        "You read the satellite pass. Call look_at_field first and describe what you SEE in the two images: "
+        "where the weak area is and its shape. Rings and arcs mean irrigation, straight edges mean weather or "
+        "a sprayer pass, irregular blotches mean soil, pests or disease. Use get_scene_analysis for the "
+        "pre-computed pattern if the live image is unavailable or ambiguous. Note the scene date.",
+        [T.list_fields, T.look_at_field, T.get_scene_analysis],
         timeline,
     )
     weather = _specialist(

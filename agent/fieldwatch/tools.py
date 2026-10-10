@@ -9,7 +9,7 @@ import json
 from datetime import date
 
 from strands import tool
-from strands.types.tools import ToolContext
+from strands.types.tools import ToolContext, ToolResult
 
 from .config import FIXTURES
 
@@ -39,6 +39,32 @@ def get_scene_analysis(field_id: str) -> dict:
     """Latest satellite pass for a field: the stress pattern seen, how far crop health dropped, and the date."""
     f = _field(field_id)
     return {"field": f["name"], "irrigation": f["irrigation"], **f["latest_scan"]}
+
+
+@tool
+def look_at_field(field_id: str) -> ToolResult:
+    """Pull the latest cloud-free satellite pass over a field and LOOK at it.
+
+    Returns two images (true color, then a crop-health heatmap where green is vigorous and brown is
+    bare or stressed) plus summary numbers. Use this to describe the shape and location of any
+    problem area. Scenes are 2-5 days apart, so the date matters.
+    """
+    from . import imagery  # heavy imports stay off the fast path
+
+    f = _field(field_id)
+    try:
+        view = imagery.look(tuple(f["bbox"]))
+    except Exception as e:  # network, no scene, etc.
+        return {"status": "error", "content": [{"text": f"could not fetch imagery for {f['name']}: {e}"}]}
+    return {
+        "status": "success",
+        "content": [
+            {"text": f"Latest clear pass over the {f['name']} ({f['crop']}, {f['irrigation']}). "
+                     f"Image 1 is true color, image 2 is crop health. Numbers: {json.dumps(view.stats)}"},
+            {"image": {"format": "png", "source": {"bytes": view.truecolor_png}}},
+            {"image": {"format": "png", "source": {"bytes": view.health_png}}},
+        ],
+    }
 
 
 @tool
@@ -107,5 +133,5 @@ def request_photo(field_id: str, where: str, tool_context: ToolContext) -> str:
     return f"Photo request sent with upload link for {f['name']} ({where})."
 
 
-READ_TOOLS = [list_fields, get_scene_analysis, get_weather, get_soil, estimate_loss]
+READ_TOOLS = [list_fields, look_at_field, get_scene_analysis, get_weather, get_soil, estimate_loss]
 WRITE_TOOLS = [create_work_order, create_scout_pin, request_photo]

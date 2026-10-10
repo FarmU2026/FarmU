@@ -3,3 +3,7 @@ strands-agents-tools>=0.8
 bedrock-agentcore>=1.24
 pydantic>=2
 ollama>=0.5
+pystac-client>=0.8
+rasterio>=1.4
+numpy>=2
+pillow>=11

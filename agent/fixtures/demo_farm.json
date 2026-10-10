@@ -1,9 +1,21 @@
 {
   "farm_id": "wohleb-farm",
-  "farmer": {"name": "Dad", "channel": "text", "quiet_hours": "21:00-06:00"},
+  "farmer": {
+    "name": "Dad",
+    "channel": "text",
+    "quiet_hours": "21:00-06:00"
+  },
   "people": [
-    {"name": "Grandpa", "role": "family", "channel": "call"},
-    {"name": "Brother", "role": "repairs", "channel": "text"}
+    {
+      "name": "Grandpa",
+      "role": "family",
+      "channel": "call"
+    },
+    {
+      "name": "Brother",
+      "role": "repairs",
+      "channel": "text"
+    }
   ],
   "fields": [
     {
@@ -12,7 +24,7 @@
       "acres": 130,
       "crop": "corn",
       "irrigation": "center pivot",
-      "price_per_bu": 4.20,
+      "price_per_bu": 4.2,
       "expected_yield_bu_ac": 210,
       "latest_scan": {
         "date": "2026-07-18",
@@ -20,8 +32,23 @@
         "ndvi_drop_pct": 23,
         "cloud_free": true
       },
-      "weather_30d": {"rain_in": 3.1, "normal_rain_in": 3.0, "hail_reported": false, "max_temp_f": 94},
-      "soil": {"type": "Holdrege silt loam", "drainage": "well drained", "note": "uniform across field"}
+      "weather_30d": {
+        "rain_in": 3.1,
+        "normal_rain_in": 3.0,
+        "hail_reported": false,
+        "max_temp_f": 94
+      },
+      "soil": {
+        "type": "Holdrege silt loam",
+        "drainage": "well drained",
+        "note": "uniform across field"
+      },
+      "bbox": [
+        -96.548,
+        42.152,
+        -96.532,
+        42.168
+      ]
     },
     {
       "id": "johnson-quarter",
@@ -29,7 +56,7 @@
       "acres": 160,
       "crop": "soybeans",
       "irrigation": "dryland",
-      "price_per_bu": 10.50,
+      "price_per_bu": 10.5,
       "expected_yield_bu_ac": 62,
       "latest_scan": {
         "date": "2026-07-18",
@@ -37,8 +64,23 @@
         "ndvi_drop_pct": 15,
         "cloud_free": true
       },
-      "weather_30d": {"rain_in": 1.2, "normal_rain_in": 3.0, "hail_reported": false, "max_temp_f": 97},
-      "soil": {"type": "Hastings silt loam", "drainage": "moderate", "note": "sandy pocket in SW corner per soil map"}
+      "weather_30d": {
+        "rain_in": 1.2,
+        "normal_rain_in": 3.0,
+        "hail_reported": false,
+        "max_temp_f": 97
+      },
+      "soil": {
+        "type": "Hastings silt loam",
+        "drainage": "moderate",
+        "note": "sandy pocket in SW corner per soil map"
+      },
+      "bbox": [
+        -96.566,
+        42.152,
+        -96.55,
+        42.168
+      ]
     },
     {
       "id": "east-80",
@@ -46,7 +88,7 @@
       "acres": 80,
       "crop": "corn",
       "irrigation": "center pivot",
-      "price_per_bu": 4.20,
+      "price_per_bu": 4.2,
       "expected_yield_bu_ac": 205,
       "latest_scan": {
         "date": "2026-07-18",
@@ -54,8 +96,25 @@
         "ndvi_drop_pct": 40,
         "cloud_free": true
       },
-      "weather_30d": {"rain_in": 3.4, "normal_rain_in": 3.0, "hail_reported": true, "hail_date": "2026-07-14", "max_temp_f": 92},
-      "soil": {"type": "Holdrege silt loam", "drainage": "well drained", "note": "uniform"}
+      "weather_30d": {
+        "rain_in": 3.4,
+        "normal_rain_in": 3.0,
+        "hail_reported": true,
+        "hail_date": "2026-07-14",
+        "max_temp_f": 92
+      },
+      "soil": {
+        "type": "Holdrege silt loam",
+        "drainage": "well drained",
+        "note": "uniform"
+      },
+      "bbox": [
+        -96.53,
+        42.16,
+        -96.522,
+        42.168
+      ]
     }
-  ]
+  ],
+  "note": "bbox is [west, south, east, north] in degrees. These are Thurston County NE placeholders; replace with the real fields."
 }
