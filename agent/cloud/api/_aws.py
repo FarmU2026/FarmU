@@ -27,6 +27,11 @@ def region() -> str:
 
 @lru_cache(maxsize=None)
 def _client(service: str, region_name: str):
+    if service == "s3":
+        # SigV4 presigned URLs on the regional endpoint (what browsers get for overlays and uploads).
+        from botocore.config import Config
+        return boto3.client("s3", region_name=region_name,
+                            config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"}))
     return boto3.client(service, region_name=region_name)
 
 
