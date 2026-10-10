@@ -27,6 +27,9 @@ def _env(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "REGION", REGION)
     monkeypatch.setattr(config, "SESSIONS_BUCKET", "")
     monkeypatch.setattr(config, "TOOLS_BACKEND", "local")
+    # the write tools go through the approvals store; keep it off agent/data so runs don't see each other's approvals
+    monkeypatch.setenv("FIELDWATCH_APPROVALS_BACKEND", "local")
+    monkeypatch.setenv("FIELDWATCH_APPROVALS_DIR", str(tmp_path / "approvals"))
 
 
 def _start_payload(**kw):
