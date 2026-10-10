@@ -10,6 +10,7 @@ from urllib.parse import unquote_plus
 from fieldwatch import contracts as C
 from fieldwatch.hazards import summarize_hail, MRMS_BUCKET
 from . import common as cm
+from botocore.exceptions import ClientError
 
 PRODUCTS = ('MESH_Max_60min_00.50', 'MESH_Max_1440min_00.50')
 
@@ -64,14 +65,18 @@ def store_watch(watch):
     """Stable row keys make redelivery safe. Event delivery may repeat (EventBridge is at least once)."""
     sort_key = watch.opened_at+'#'+watch.watch_id
     keys = [{'field_id':f.field_id, 'opened_at_watch_id':sort_key} for f in watch.fields]
-    existing = [cm.table('watches').get_item(Key=key).get('Item',{}) for key in keys]
+    existing = [cm.table('watches').get_item(Key=key,ConsistentRead=True).get('Item',{}) for key in keys]
     if existing and all(row.get('event_emitted') for row in existing): return False
-    for field in watch.fields:
+    for field, old in zip(watch.fields, existing):
+        if old: continue
         row = watch.model_dump(mode='json')
         row.update(field_id=field.field_id,farm_id=field.farm_id,status='open',
                    opened_at_watch_id=watch.opened_at+'#'+watch.watch_id,
                    expires_at=int(cm.parse_time(watch.expires_at).timestamp()), expires_at_iso=watch.expires_at)
-        cm.table('watches').put_item(Item=cm.to_ddb(row))
+        try:
+            cm.table('watches').put_item(Item=cm.to_ddb(row),ConditionExpression='attribute_not_exists(field_id)')
+        except ClientError as exc:
+            if exc.response['Error']['Code'] != 'ConditionalCheckFailedException': raise
     cm.emit(C.WatchOpened(occurred_at=cm.iso(cm.now()),watch=watch),source='fieldwatch.hazards')
     for key in keys:
         cm.table('watches').update_item(Key=key,UpdateExpression='SET event_emitted = :yes',ExpressionAttributeValues={':yes':True})

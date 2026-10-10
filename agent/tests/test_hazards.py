@@ -84,7 +84,7 @@ def test_mesh_georeferencing_masks_outside_field(tmp_path):
 class Table:
     def __init__(self,rows=()): self.rows={}; self.initial=list(rows)
     def scan(self,**kwargs): return {'Items':self.initial}
-    def get_item(self,Key): return {'Item':self.rows.get(tuple(sorted(Key.items())),{})}
+    def get_item(self,Key,**kwargs): return {'Item':self.rows.get(tuple(sorted(Key.items())),{})}
     def put_item(self,Item,**kwargs):
         key={'field_id':Item['field_id'],'opened_at_watch_id':Item['opened_at_watch_id']}
         self.rows[tuple(sorted(key.items()))]=Item
@@ -158,3 +158,28 @@ def test_spc_operational_day():
         def raise_for_status(self): pass
     reports=spc_reports(date(2026,7,13),http_get=lambda *a,**k:SPCResponse())
     assert [r['date'] for r in reports]==['2026-07-14','2026-07-13']
+
+
+def test_closed_watch_redelivery_preserves_state(monkeypatch):
+    from fieldwatch.contracts import Watch, FieldRef
+    watch=Watch(watch_id='w',type='hail',fields=[FieldRef(farm_id='farm',field_id='f')],detail={},opened_at='2026-07-14T00:00:00Z',expires_at='2026-07-28T00:00:00Z')
+    watches=Table(); watches.put_item(Item={'field_id':'f','opened_at_watch_id':watch.opened_at+'#w','status':'closed'})
+    monkeypatch.setattr(hail_filter.cm,'table',lambda name:watches)
+    monkeypatch.setattr(hail_filter.cm,'emit',lambda *a,**k:None)
+    hail_filter.store_watch(watch)
+    assert next(iter(watches.rows.values()))['status']=='closed'
+
+
+def test_context_conditional_race_does_not_overwrite(monkeypatch):
+    from cloud.lambdas.hazards import drought_poller as poll
+    from botocore.exceptions import ClientError
+    fields=Table([dict(farm_id='farm',field_id='f',county_fips='31173')]); context=Table()
+    seen=[]
+    def update(**kwargs):
+        seen.append(kwargs)
+        raise ClientError({'Error':{'Code':'ConditionalCheckFailedException'}},'UpdateItem')
+    context.update_item=update
+    monkeypatch.setattr(poll.cm,'table',lambda name:{'fields':fields,'farms':Table(),'field-context':context}[name])
+    monkeypatch.setattr(poll,'get_drought',lambda *a:drought_status('31173','2026-07-14',[dict(MapDate='20260714',D0=100,D1=60,D2=0,D3=0,D4=0)]))
+    assert poll.handler({'as_of':'2026-07-14'})['updated']==0
+    assert 'drought.#date <= :date' in seen[0]['ConditionExpression']

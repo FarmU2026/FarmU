@@ -18,18 +18,21 @@ class Hazards(Stack):
     def __init__(self, scope:Construct, construct_id:str, *, data:DataPlane, **kwargs):
         super().__init__(scope,construct_id,**kwargs)
         Tags.of(self).add('project','fieldwatch')
+        iam.PermissionsBoundary.of(self).apply(iam.ManagedPolicy.from_managed_policy_name(self,'Boundary','fieldwatch-boundary'))
         env={'FIELDWATCH_TABLE_PREFIX':'fw-', 'FIELDWATCH_BUCKET':data.bucket.bucket_name,
              'FIELDWATCH_EVENT_BUS':data.bus.event_bus_name}
         self.dlq=sqs.Queue(self,'HailDlq',queue_name='fw-hail-dlq',retention_period=Duration.days(14),enforce_ssl=True)
         self.queue=sqs.Queue(self,'HailQueue',queue_name='fw-hail-queue',visibility_timeout=Duration.seconds(720),
             retention_period=Duration.days(4),enforce_ssl=True,
             dead_letter_queue=sqs.DeadLetterQueue(queue=self.dlq,max_receive_count=5))
-        self.queue.add_to_resource_policy(iam.PolicyStatement(principals=[iam.ServicePrincipal('sns.amazonaws.com')],
+        policy_result = self.queue.add_to_resource_policy(iam.PolicyStatement(principals=[iam.ServicePrincipal('sns.amazonaws.com')],
             actions=['sqs:SendMessage'],resources=[self.queue.queue_arn],conditions={'ArnEquals':{'aws:SourceArn':MRMS_TOPIC}}))
-        sns.CfnSubscription(self,'MrmsSubscription',protocol='sqs',endpoint=self.queue.queue_arn,
+        subscription = sns.CfnSubscription(self,'MrmsSubscription',protocol='sqs',endpoint=self.queue.queue_arn,
             topic_arn=MRMS_TOPIC,region='us-east-1',raw_message_delivery=True,
             filter_policy_scope='MessageBody',filter_policy={'Records':{'s3':{'object':{'key':[
                 {'prefix':'CONUS/MESH_Max_60min_00.50/'},{'prefix':'CONUS/MESH_Max_1440min_00.50/'}]}}}})
+        if policy_result.policy_dependable:
+            subscription.node.add_dependency(policy_result.policy_dependable)
         self.hail_filter=geo_lambda(self,'HailFilter',handler='cloud.lambdas.hazards.hail_filter.handler',
             function_name='fw-hail-filter',environment=env,timeout_s=120,memory_mb=3008)
         self.hail_filter.add_event_source(sources.SqsEventSource(self.queue,batch_size=1,report_batch_item_failures=True))
