@@ -29,7 +29,7 @@ Access(app, "FieldWatch-Access", data=data, env=env)
 # Notifications(app, "FieldWatch-Notifications", data=data, env=env)  # workstream 9 (Kurt)
 # from stacks.analysis import Analysis
 # Analysis(app, "FieldWatch-Analysis", data=data, env=env)        # workstreams 1-2
-# from stacks.tools import Tools
-# Tools(app, "FieldWatch-Tools", data=data, env=env)              # workstream 6 (Lambda targets for the Gateway)
+from stacks.tools import Tools
+Tools(app, "FieldWatch-Tools", data=data, env=env)  # workstream 6 (Gateway + tool Lambda)
 
 app.synth()
