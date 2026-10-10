@@ -1,0 +1,18 @@
+{
+  "field_id": "north-pivot",
+  "map_units": [
+    {
+      "mukey": "427691",
+      "name": "Holdrege silt loam, 0 to 1 percent slopes",
+      "pct_area": 100.0,
+      "texture_0_30": "silt loam",
+      "texture_30_100": "silty clay loam",
+      "awc_0_100_cm": 21.5,
+      "drainage_class": "Well drained",
+      "hydro_group": "B",
+      "sandy": false
+    }
+  ],
+  "zones_key": null,
+  "source": "NRCS Soil Data Access"
+}

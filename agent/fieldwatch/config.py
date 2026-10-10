@@ -9,7 +9,7 @@ load_dotenv(ROOT / ".env")
 FIXTURES = ROOT / "fixtures"
 SESSIONS = ROOT / "sessions"
 
-REGION = os.getenv("AWS_REGION", "us-west-2")
+REGION = os.getenv("AWS_REGION", "us-west-2")  # docs/decisions.md D3 (a local .env may override for Bedrock)
 
 # Which model backs every agent. Set FIELDWATCH_PROVIDER to one of:
 #   bedrock  (default) Bedrock, paid from the $100 free-tier credit. Model via FIELDWATCH_MODEL.
@@ -20,7 +20,7 @@ PROVIDER = os.getenv("FIELDWATCH_PROVIDER", "bedrock").lower()
 #   us.amazon.nova-lite-v1:0                       ~free, fine for wiring tests
 #   us.anthropic.claude-haiku-4-5-20251001-v1:0    cheap, good tool use; default for dev
 #   us.anthropic.claude-sonnet-4-5-20250929-v1:0   best; use for the demo
-MODEL_ID = os.getenv("FIELDWATCH_MODEL", "us.anthropic.claude-sonnet-4-5-20250929-v1:0")
+MODEL_ID = os.getenv("FIELDWATCH_MODEL", "us.anthropic.claude-haiku-4-5-20251001-v1:0")  # D4
 
 # Farm definition the tools read. The web UI points this at a per-farm file it writes.
 FARM_FILE = Path(os.getenv("FIELDWATCH_FARM_FILE", str(FIXTURES / "demo_farm.json")))
@@ -28,3 +28,15 @@ DATA = ROOT / "data"
 
 OLLAMA_HOST = os.getenv("FIELDWATCH_OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("FIELDWATCH_OLLAMA_MODEL", "qwen3:8b")
+
+# Cloud resources (docs/decisions.md D1). Lambdas get these from their CDK stack's environment;
+# local runs set them in agent/.env. Unset values mean that resource isn't available locally.
+TOOLS_BACKEND = os.getenv("FIELDWATCH_TOOLS_BACKEND", "local")  # local | gateway (WS6): tools in-process or via Gateway
+SESSIONS_BUCKET = os.getenv("FIELDWATCH_SESSIONS_BUCKET", "")  # S3 session storage on Runtime (WS7)
+APPSYNC_HTTP_ENDPOINT = os.getenv("FIELDWATCH_APPSYNC_HTTP", "")  # live feed publish endpoint (WS13)
+LINK_KEY_PARAM = os.getenv("FIELDWATCH_LINK_KEY_PARAM", "/fieldwatch/link-signing-key")
+RUNTIME_ARN = os.getenv("FIELDWATCH_RUNTIME_ARN", "")
+GATEWAY_URL = os.getenv("FIELDWATCH_GATEWAY_URL", "")
+TABLE_PREFIX = os.getenv("FIELDWATCH_TABLE_PREFIX", "fw-")
+BUCKET = os.getenv("FIELDWATCH_BUCKET", "")
+EVENT_BUS = os.getenv("FIELDWATCH_EVENT_BUS", "fieldwatch")

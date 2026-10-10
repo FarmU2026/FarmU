@@ -6,7 +6,7 @@ import pytest
 from fieldwatch import imagery
 from fieldwatch.tools import look_at_field
 
-pytestmark = pytest.mark.skipif(os.getenv("FIELDWATCH_LIVE") != "1", reason="set FIELDWATCH_LIVE=1")
+pytestmark = [pytest.mark.live, pytest.mark.skipif(os.getenv("FIELDWATCH_LIVE") != "1", reason="set FIELDWATCH_LIVE=1")]
 
 
 def test_latest_scene_and_render():

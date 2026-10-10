@@ -1,0 +1,7 @@
+{
+  "message_id": "msg-001",
+  "approval_id": "apr-001",
+  "status": "sent",
+  "provider": "twilio",
+  "scheduled_for": null
+}

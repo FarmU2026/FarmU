@@ -1,0 +1,14 @@
+{
+  "action_id": "act-001",
+  "approval_id": "apr-001",
+  "investigation_id": "inv-north-pivot-20260718",
+  "type": "work_order",
+  "assignee_person_id": "brother",
+  "pin": [
+    -96.54,
+    42.1535
+  ],
+  "instructions": "Check the outer span nozzles and end tower on the north pivot",
+  "status": "sent",
+  "done_at": null
+}

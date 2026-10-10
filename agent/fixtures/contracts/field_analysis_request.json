@@ -1,0 +1,40 @@
+{
+  "schema_version": "1",
+  "field": {
+    "farm_id": "wohleb-farm",
+    "field_id": "north-pivot"
+  },
+  "polygon": [
+    [
+      -96.548,
+      42.152
+    ],
+    [
+      -96.532,
+      42.152
+    ],
+    [
+      -96.532,
+      42.168
+    ],
+    [
+      -96.548,
+      42.168
+    ]
+  ],
+  "crop": "corn",
+  "as_of": "2026-07-18",
+  "scene": null,
+  "interior_buffer_m": 10.0,
+  "pivot": {
+    "center": [
+      -96.54,
+      42.16
+    ],
+    "radius_m": 800
+  },
+  "open_watch_ids": [],
+  "min_clear_fraction": 0.7,
+  "min_region_acres": 1.2,
+  "z_threshold": 2.0
+}

@@ -1,0 +1,120 @@
+{
+  "schema_version": "1",
+  "field": {
+    "farm_id": "wohleb-farm",
+    "field_id": "north-pivot"
+  },
+  "scene_id": "S2B_14TPM_20260718_0_L2A",
+  "date": "2026-07-18",
+  "status": "ok",
+  "clear_fraction": 0.98,
+  "indices": {
+    "ndvi": {
+      "mean": 0.78,
+      "p10": 0.52,
+      "p50": 0.83,
+      "p90": 0.88
+    },
+    "ndre": {
+      "mean": 0.41,
+      "p10": 0.28,
+      "p50": 0.43,
+      "p90": 0.47
+    },
+    "ndmi": {
+      "mean": 0.36,
+      "p10": 0.18,
+      "p50": 0.39,
+      "p90": 0.44
+    }
+  },
+  "anomaly": {
+    "field_score": 2.4,
+    "z_baseline": -2.9,
+    "z_cohort": -2.2,
+    "delta_since_last": -0.11,
+    "regions": [
+      {
+        "region_id": "r1",
+        "geometry": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -96.5475,
+                42.1525
+              ],
+              [
+                -96.5325,
+                42.1525
+              ],
+              [
+                -96.5325,
+                42.1545
+              ],
+              [
+                -96.5475,
+                42.1545
+              ],
+              [
+                -96.5475,
+                42.1525
+              ]
+            ]
+          ]
+        },
+        "area_acres": 12.1,
+        "centroid": [
+          -96.54,
+          42.1535
+        ],
+        "score": 3.1,
+        "features": {
+          "ring_score": 0.82,
+          "wedge_score": 0.12,
+          "edge_band_score": 0.2,
+          "stripe_score": 0.05,
+          "lowspot_overlap": 0.08,
+          "sandy_soil_overlap": 0.04,
+          "hail_swath_overlap": null
+        }
+      }
+    ]
+  },
+  "gates": {
+    "senescence": false,
+    "harvest": false,
+    "regional": false
+  },
+  "overlays": {
+    "true_color": {
+      "key": "analysis/north-pivot/2026-07-18/s2/true_color.png",
+      "bounds": [
+        -96.548,
+        42.152,
+        -96.532,
+        42.168
+      ]
+    },
+    "health": {
+      "key": "analysis/north-pivot/2026-07-18/s2/health.png",
+      "bounds": [
+        -96.548,
+        42.152,
+        -96.532,
+        42.168
+      ]
+    },
+    "mask": {
+      "key": "analysis/north-pivot/2026-07-18/s2/mask.png",
+      "bounds": [
+        -96.548,
+        42.152,
+        -96.532,
+        42.168
+      ]
+    }
+  },
+  "analysis_key": "analysis/north-pivot/2026-07-18/s2/",
+  "error": null
+}

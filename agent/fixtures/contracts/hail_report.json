@@ -1,0 +1,11 @@
+{
+  "field_id": "north-pivot",
+  "start": "2026-07-04",
+  "end": "2026-07-18",
+  "max_hail_mm": 0.0,
+  "pct_area_over_threshold": 0.0,
+  "threshold_mm": 25.4,
+  "peak_date": null,
+  "ground_reports": [],
+  "source": "NOAA MRMS MESH"
+}

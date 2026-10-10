@@ -1,0 +1,10 @@
+pydantic>=2
+python-dotenv>=1
+requests>=2.31
+numpy>=2
+rasterio>=1.4
+pillow>=11
+pystac-client>=0.8
+shapely>=2
+scikit-image>=0.24
+strands-agents>=1.59

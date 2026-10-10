@@ -1,0 +1,89 @@
+{
+  "schema_version": "1",
+  "occurred_at": "2026-07-18T17:21:05Z",
+  "anomaly_id": "anm-north-pivot-20260718",
+  "field": {
+    "farm_id": "wohleb-farm",
+    "field_id": "north-pivot"
+  },
+  "scene_id": "S2B_14TPM_20260718_0_L2A",
+  "date": "2026-07-18",
+  "regions": [
+    {
+      "region_id": "r1",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -96.5475,
+              42.1525
+            ],
+            [
+              -96.5325,
+              42.1525
+            ],
+            [
+              -96.5325,
+              42.1545
+            ],
+            [
+              -96.5475,
+              42.1545
+            ],
+            [
+              -96.5475,
+              42.1525
+            ]
+          ]
+        ]
+      },
+      "area_acres": 12.1,
+      "centroid": [
+        -96.54,
+        42.1535
+      ],
+      "score": 3.1,
+      "features": {
+        "ring_score": 0.82,
+        "wedge_score": 0.12,
+        "edge_band_score": 0.2,
+        "stripe_score": 0.05,
+        "lowspot_overlap": 0.08,
+        "sandy_soil_overlap": 0.04,
+        "hail_swath_overlap": null
+      }
+    }
+  ],
+  "overlays": {
+    "true_color": {
+      "key": "analysis/north-pivot/2026-07-18/s2/true_color.png",
+      "bounds": [
+        -96.548,
+        42.152,
+        -96.532,
+        42.168
+      ]
+    },
+    "health": {
+      "key": "analysis/north-pivot/2026-07-18/s2/health.png",
+      "bounds": [
+        -96.548,
+        42.152,
+        -96.532,
+        42.168
+      ]
+    },
+    "mask": {
+      "key": "analysis/north-pivot/2026-07-18/s2/mask.png",
+      "bounds": [
+        -96.548,
+        42.152,
+        -96.532,
+        42.168
+      ]
+    }
+  },
+  "open_watch_ids": [],
+  "replay": true
+}

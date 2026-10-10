@@ -1,0 +1,36 @@
+{
+  "status": "waiting_for_farmer",
+  "text": "Send Brother a repair ticket for the north pivot: check the outer span. YES / NO",
+  "investigation_id": "inv-north-pivot-20260718",
+  "interrupt_id": "int-abc123",
+  "diagnosis": null,
+  "hypotheses": [
+    {
+      "condition": "pivot_failure",
+      "probability": 0.86,
+      "status": "likely"
+    },
+    {
+      "condition": "drought",
+      "probability": 0.03,
+      "status": "ruled_out"
+    },
+    {
+      "condition": "hail",
+      "probability": 0.02,
+      "status": "ruled_out"
+    },
+    {
+      "condition": "sandy_soil_water_stress",
+      "probability": 0.04,
+      "status": "ruled_out"
+    },
+    {
+      "condition": "disease_pest",
+      "probability": 0.05,
+      "status": "open"
+    }
+  ],
+  "backend": "local",
+  "error": null
+}

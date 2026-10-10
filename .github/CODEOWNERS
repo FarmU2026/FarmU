@@ -1,0 +1,33 @@
+# Who reviews what (docs/workstreams.md). GitHub requests these reviewers automatically on PRs.
+*                                   @Caleb-Kelly-25
+
+# Contracts and the registry are shared: changes need the whole team's eyes.
+/agent/fieldwatch/contracts.py      @Caleb-Kelly-25 @kdumbl @aaronwohleb
+/agent/fixtures/contracts/          @Caleb-Kelly-25 @kdumbl @aaronwohleb
+/agent/fieldwatch/registry.py       @Caleb-Kelly-25 @kdumbl @aaronwohleb
+
+# Aaron: field analyzer (WS1); scorer, catalog, impact, agent reasoning (WS5)
+/agent/fieldwatch/analysis/         @aaronwohleb
+/agent/fieldwatch/imagery.py        @aaronwohleb
+/agent/fieldwatch/scoring.py        @aaronwohleb
+/agent/fieldwatch/agents.py         @aaronwohleb
+/agent/fieldwatch/schemas.py        @aaronwohleb
+/agent/catalog/                     @aaronwohleb @Caleb-Kelly-25
+
+# Kurt: notifications (WS9), hazards (WS3), field context (WS4)
+/agent/fieldwatch/notify/           @kdumbl
+/agent/fieldwatch/sms.py            @kdumbl
+/agent/fieldwatch/hazards/          @kdumbl
+/agent/fieldwatch/context/          @kdumbl
+
+# Cloud handlers, front end, infra: built by Claude agents, reviewed and deployed by Caleb.
+# (Later lines win, so Kurt's specific folders come after these.)
+/agent/cloud/                       @Caleb-Kelly-25
+/web/                               @Caleb-Kelly-25
+/infra/                             @Caleb-Kelly-25
+/.github/                           @Caleb-Kelly-25 @kdumbl
+
+/agent/cloud/lambdas/hazards/       @kdumbl
+/agent/cloud/lambdas/notify/        @kdumbl
+/infra/stacks/hazards.py            @kdumbl @Caleb-Kelly-25
+/infra/stacks/notifications.py      @kdumbl @Caleb-Kelly-25

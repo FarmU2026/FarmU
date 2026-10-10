@@ -1,1 +1,6 @@
 *.env
+infra/cdk.out/
+infra/cdk.context.json
+**/node_modules/
+__pycache__/
+*.pyc

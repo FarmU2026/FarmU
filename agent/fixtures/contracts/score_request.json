@@ -1,0 +1,57 @@
+{
+  "investigation_id": "inv-north-pivot-20260718",
+  "crop": "corn",
+  "stage": "R2 (blister)",
+  "irrigated": true,
+  "evidence": [
+    {
+      "evidence_id": "ev1",
+      "hypothesis": "pivot_failure",
+      "direction": "supports",
+      "weight_key": "ring_pattern_strong",
+      "source": "analyze_field",
+      "value": {
+        "ring_score": 0.82
+      },
+      "reason": "The weak area is a ring on the outer edge, the path of the pivot's last span.",
+      "created_at": "2026-07-18T17:21:05Z"
+    },
+    {
+      "evidence_id": "ev2",
+      "hypothesis": "drought",
+      "direction": "refutes",
+      "weight_key": "rain_normal_30d",
+      "source": "get_weather",
+      "value": {
+        "rain_mm_30d": 81,
+        "normal_mm_30d": 76
+      },
+      "reason": "Rain over the last month was normal.",
+      "created_at": "2026-07-18T17:21:05Z"
+    },
+    {
+      "evidence_id": "ev3",
+      "hypothesis": "hail",
+      "direction": "refutes",
+      "weight_key": "no_hail_mesh",
+      "source": "get_hail",
+      "value": {
+        "max_hail_mm": 0
+      },
+      "reason": "Radar shows no hail over the field in the last two weeks.",
+      "created_at": "2026-07-18T17:21:05Z"
+    },
+    {
+      "evidence_id": "ev4",
+      "hypothesis": "sandy_soil_water_stress",
+      "direction": "refutes",
+      "weight_key": "soil_not_sandy",
+      "source": "get_soil",
+      "value": {
+        "sandy_soil_overlap": 0.04
+      },
+      "reason": "The soil is uniform silt loam, not sand.",
+      "created_at": "2026-07-18T17:21:05Z"
+    }
+  ]
+}

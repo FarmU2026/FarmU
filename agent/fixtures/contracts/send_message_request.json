@@ -1,0 +1,14 @@
+{
+  "schema_version": "1",
+  "farm_id": "wohleb-farm",
+  "person_id": "dad",
+  "investigation_id": "inv-north-pivot-20260718",
+  "body": "North pivot: the crop in a ring on the outer edge is stressed. Rain's been normal, so a nozzle or tower likely isn't watering. At risk: $9,000-$14,000. Send a repair ticket? YES / NO / MORE",
+  "link": null,
+  "approval": {
+    "action_type": "work_order",
+    "ttl_hours": 24
+  },
+  "urgency": "actionable",
+  "idempotency_key": "inv-north-pivot-20260718#alert"
+}
