@@ -8,11 +8,12 @@ Strands agents that watch a family farm's fields from satellite, diagnose proble
 - `docs/workstreams.md`: who owns what, folder ownership, goals, checkpoints.
 - Plan docs (the target): `docs/system-design.md`, `docs/implementation-specs.md`, `docs/data-pipelines.md`, `docs/core-features.md`, `docs/build-plan.md`.
 
-## Shape
-- `agent/web/`: FastAPI hub + Leaflet page: sign-up map, dashboard, phone mirror. Run: `cd agent; python -m uvicorn web.server:app --port 8000`.
-- `agent/fieldwatch/`: agents (`agents.py`), tools (`tools.py`), contracts (`contracts.py`), tool registry (`registry.py`), config and backend switches (`config.py`).
-- `agent/cloud/`: Lambda handlers and the AgentCore CLI project. `infra/`: Python CDK app (data plane + per-workstream stacks).
-- Every cloud capability sits behind a switch in `config.SWITCHES`; `local` is the default and the demo fallback.
+## Shape (the plan's full serverless architecture; docs/decisions.md D1)
+- `web/`: static front end (today's Leaflet UI + report and work-order pages) on S3 + CloudFront, calling the API Gateway HTTP API and subscribing to AppSync Events.
+- `agent/fieldwatch/`: agents (`agents.py`), tools (`tools.py`), contracts (`contracts.py`), tool registry (`registry.py`), config (`config.py`), and the domain packages (`analysis/`, `context/`, `hazards/`, `notify/`, scoring, approvals). Pure code, importable from Lambdas.
+- `agent/cloud/`: Lambda handlers (API, feed projector, pipelines, Gateway tools, notifications) and the AgentCore CLI project (`agentcore/`) for the agent on Runtime.
+- `infra/`: Python CDK app, one stack per subsystem (`FieldWatch-<Subsystem>`), on the shared `FieldWatch-DataPlane`.
+- `agent/web/server.py` (FastAPI) is a local dev harness only: `cd agent; python -m uvicorn web.server:app --port 8000`.
 
 ## Rules
 - Build against `contracts.py` and `fixtures/contracts/`. Never change a contract inside a feature change; contract changes are their own small PR.

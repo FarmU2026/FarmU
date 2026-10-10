@@ -1,103 +1,113 @@
-# Workstreams (parallel build, Oct 10–11)
+# Workstreams (parallel build of the full architecture, Oct 10–11)
 
-How the remaining work is split so three people and their Claude Code agents can build at the same time. Read `docs/decisions.md` first; it overrides the plan docs.
+How the remaining work is split so three people and many Claude Code agents can build at once. Read `docs/decisions.md` first; it overrides the plan docs. Plan ticket numbers (T##) refer to `docs/build-plan.md`.
 
 ## How this works
 
 - **Contracts first.** Everything that crosses a workstream boundary is a model in `agent/fieldwatch/contracts.py`, with a sample in `agent/fixtures/contracts/`. Build against the samples; don't wait for other lanes.
-- **The registry is the joint.** `agent/fieldwatch/registry.py` lists every tool. Stub entries return contract samples; your workstream replaces the stub's `fn` with the real implementation. The Gateway (workstream 6) generates its tools from the same list.
-- **Own your folders.** Each workstream edits only the paths listed for it. Shared files have one owner; ask that person (or open a tiny PR) to change them.
-- **One branch per ticket**, short-lived, merged to `main` often. CI must stay green with every switch on `local`.
-- **One Claude Code session per workstream**, in its own git worktree:
+- **The registry is the joint.** `agent/fieldwatch/registry.py` lists every agent tool. Stub entries return contract samples; a workstream replaces its stub's `fn`. The Gateway (WS6) generates its Lambda tools from the same list.
+- **Own your folders** (table below and `.github/CODEOWNERS`). Shared files have one owner; ask, or open a tiny PR.
+- **Data access:** use boto3 against the `fw-` tables, bucket and `fieldwatch` bus directly, with names from `fieldwatch/config.py`. Keys and indexes: `infra/stacks/data_plane.py`.
+- **One branch per workstream**, short-lived, merged to `main` often. CI (offline tests, `cdk synth`, secret scan) must stay green.
+- **One Claude Code session per workstream** in its own git worktree:
   ```powershell
-  git worktree add ..\FarmU-ws3 -b ws3-hail
+  git worktree add ..\FarmU-ws3 -b ws3-hazards origin/main
   cd ..\FarmU-ws3; claude
   ```
-  Paste the workstream's prompt below. Ask for a plan first, then let it implement.
-- **Contract changes** go in their own small PR, announced in team chat. Never change a contract inside a feature PR.
-- **Deploys:** Caleb (or the deploy workflow on main) deploys every stack. Kurt and Aaron write their stacks and open PRs, and use the `fieldwatch-dev` role for Bedrock, data and logs (D3).
-
-## Shared files and their owners
-
-| File | Owner | Others |
-| --- | --- | --- |
-| `agent/fieldwatch/contracts.py`, `fixtures/contracts/` | Caleb (WS0) | Small PRs only |
-| `agent/fieldwatch/registry.py` | Caleb (WS0) | Swap your own entry's `fn`/`stub` in your PR |
-| `agent/fieldwatch/config.py` | Caleb (WS0) | Add your env vars in a small PR |
-| `agent/fieldwatch/agents.py` (prompts, roster) | Aaron (WS5) | |
-| `agent/fieldwatch/tools.py` | Caleb (WS8 for write tools) | Read tools move behind the registry |
-| `agent/web/server.py`, `agent/web/static/` | Caleb (WS10) | Expose functions; WS10 wires them in |
-| `infra/app.py` | Caleb (WS0) | Add one line for your stack |
+  Paste the prompt at the bottom with your workstream's goal. Ask for a plan first.
+- **Contract changes** go in their own small PR, announced in team chat.
+- **Deploys:** Caleb (or the deploy workflow on main) deploys every stack. Everyone else writes their stack in `infra/stacks/` and opens a PR. Kurt and Aaron use the `fieldwatch-dev` role for Bedrock, data and logs (D3).
 
 ## Workstreams
 
-| WS | Name | Owner | Paths | Depends on (samples unblock you) | Plan refs |
-| --- | --- | --- | --- | --- | --- |
-| 0 | Foundation + integration | Caleb | contracts, registry, config, infra/app.py, CI, merges | — | T01–T04, T06 |
-| 1 | Field analyzer | Aaron | `agent/fieldwatch/analysis/`, `tests/test_analysis*.py` | contracts | T11, T13; pipelines B2, M1–M3 |
-| 2 | Orchestration + replay + trigger | Caleb | `agent/fieldwatch/trigger.py`, `agent/cloud/lambdas/scene_check/`, `agent/cloud/lambdas/session_starter/`, `infra/stacks/analysis.py` | WS1 (stub ok) | T14, T34 |
-| 3 | Hazards | Kurt | `agent/fieldwatch/hazards/`, `infra/stacks/hazards.py`, `tests/test_hazards.py` | contracts | T15, T16; pipelines C1–C4 |
-| 4 | Field context | Kurt | `agent/fieldwatch/context/`, `tests/test_context.py` | contracts | T08–T10, T12, T26; pipelines A1–A10 |
-| 5 | Scorer, catalog, impact, agent reasoning | Aaron | `agent/catalog/`, `agent/fieldwatch/scoring.py`, `agent/fieldwatch/agents.py`, `agent/fieldwatch/schemas.py`, `tests/test_scoring.py` | contracts | T20; pipelines M4–M5 |
-| 6 | Gateway tools | Caleb | `agent/cloud/gateway/`, `agent/fieldwatch/toolset.py`, `infra/stacks/tools.py` | registry | T19, T21 |
-| 7 | Agent on Runtime + sessions + memory | Caleb | `agent/cloud/agentcore/`, `agent/app.py`, `agent/fieldwatch/investigation.py`, `agent/fieldwatch/runner.py` | — | T23, T24 |
-| 8 | Approvals + write tools | Caleb | `agent/fieldwatch/approvals.py`, write tools in `tools.py`, `tests/test_approvals.py` | WS9 send API | T22 |
-| 9 | Notifications | Kurt | `agent/fieldwatch/notify/` (from `sms.py`), `infra/stacks/notifications.py`, `tests/test_notify*.py` | contracts | T17, T18 |
-| 10 | Web app as client | Caleb | `agent/web/`, `agent/fieldwatch/store.py` | WS7 runner, WS9 | T27, T29, T30 |
-| 11 | Evaluation + hero scenes | Caleb (Caleb picks the scenes) | `agent/eval/`, `docs/hero-scenes.md` | WS1, WS5 | P4, T32 |
+| WS | Name | Owner | Paths | Plan refs |
+| --- | --- | --- | --- | --- |
+| 1 | Field analyzer | Aaron | `agent/fieldwatch/analysis/`, `tests/test_analysis*.py` | T11, T13; pipelines B2, M1–M3 |
+| 2 | Scene pipeline + replay | Claude → Caleb | `agent/cloud/lambdas/scenes/`, `infra/stacks/scenes.py`, `tests/test_scenes.py` | T14, T34 |
+| 3 | Hazards | Kurt | `agent/fieldwatch/hazards/`, `agent/cloud/lambdas/hazards/`, `infra/stacks/hazards.py`, `tests/test_hazards.py` | T15, T16 |
+| 4 | Field context functions | Kurt | `agent/fieldwatch/context/`, `tests/test_context.py` | T09, T10, T12, T26 |
+| 5 | Scorer, catalog, impact, agent reasoning | Aaron | `agent/catalog/`, `agent/fieldwatch/scoring.py`, `agent/fieldwatch/agents.py`, `agent/fieldwatch/schemas.py`, `tests/test_scoring.py` | T20 |
+| 6 | Gateway + tools | Claude → Caleb | `agent/cloud/gateway/`, `agent/fieldwatch/toolset.py`, `infra/stacks/tools.py`, `tests/test_gateway.py` | T19, T21 |
+| 7 | Agent on Runtime + session starter + memory | Claude → Caleb | `agent/cloud/agentcore/`, `agent/app.py`, `agent/fieldwatch/investigation.py`, `agent/cloud/lambdas/session_starter/`, `infra/stacks/agent.py`, `tests/test_runtime*.py` | T23, T24 |
+| 8 | Approvals + write tools + policy | Claude → Caleb | `agent/fieldwatch/approvals.py`, `agent/fieldwatch/actions.py`, `infra/policies/cedar/`, `tests/test_approvals.py` | T22 |
+| 9 | Notifications | Kurt | `agent/fieldwatch/notify/` (from `sms.py`), `agent/cloud/lambdas/notify/`, `infra/stacks/notifications.py`, `tests/test_notify*.py` | T17, T18 |
+| 11 | Evaluations + hero scenes | Caleb (+ Claude) | `agent/eval/`, `docs/hero-scenes.md` | P4, T32 |
+| 12 | Web API | Claude → Caleb | `agent/cloud/api/`, `infra/stacks/api.py`, `tests/test_api*.py` | T27 |
+| 13 | Live feed | Claude → Caleb | `agent/cloud/feed/`, `infra/stacks/feed.py`, `tests/test_feed.py` | T28 |
+| 14 | Front end on CloudFront | Claude → Caleb | `web/` (new top-level static site), `infra/stacks/frontend.py` | T29, T30, T33 |
+| 15 | Context builder workflow | Claude → Caleb | `agent/cloud/lambdas/context/`, `infra/stacks/context.py`, `tests/test_context_workflow.py` | T08 |
+| 16 | Knowledge base | later | `data-prep/corpus.py`, `infra/stacks/knowledge.py` | T25 |
+| 17 | Photo intake | later | `agent/cloud/lambdas/intake/`, `infra/stacks/intake.py` | T31 |
 
-## Goals per workstream
+Shared files: `contracts.py`, `fixtures/contracts/`, `registry.py`, `config.py`, `infra/app.py`, `.github/` are Caleb's (small PRs welcome). `agent/web/` (the FastAPI dev harness) is frozen; the UI moves to `web/` in WS14.
+
+## Goals
 
 Write your own checks from the goal first (Build Plan "the loop for every ticket"), then implement.
 
-1. **Field analyzer.** For a field polygon and an as-of date, analyze the latest clear Sentinel-2 scene on or before that date. Output a `FieldAnalysisResult`. It must:
-   - mask clouds and shadow per pixel from the scene classification band, and apply a ~10 m interior buffer;
-   - compute NDVI, NDRE and NDMI (apply scale/offset when using the C1 collection);
-   - compute z-scores against the same weeks in 2–3 prior seasons, plus the change since the previous clear pass;
-   - extract regions of at least 0.5 ha with pattern features (ring, wedge, edge band, stripes; overlaps filled when soil, low-spot or hail layers are given);
-   - set the gates: senescence/harvest by date and crop, uniform whole-field drop, region-wide drop;
-   - write overlays.
+1. **Field analyzer:** `analyze(FieldAnalysisRequest) -> FieldAnalysisResult`. For a field polygon and an as-of date, use the latest clear Sentinel-2 scene on or before that date. Steps:
+   - per-pixel cloud and shadow mask from the scene classification band, ~10 m interior buffer;
+   - NDVI, NDRE and NDMI (scale/offset for the C1 collection);
+   - z-scores against the same weeks in 2–3 prior seasons, plus change since the previous clear pass;
+   - regions of at least 0.5 ha with pattern features (ring, wedge, edge band, stripes; overlaps when soil, low-spot or hail layers are given);
+   - gates: senescence and harvest by date and crop, uniform whole-field drop, region-wide drop;
+   - overlay PNGs written to S3 under `analysis/`.
 
-   It should flag a real summer problem and stay quiet on healthy and end-of-season fields. Replace `registry.analyze_field`.
-2. **Orchestration + replay + trigger.** Local: `trigger.check_farm(farm, as_of)` runs analysis on every field and, when a region passes and no gate is set, starts an investigation. The web watcher calls it. Cloud: Scheduler → scene-check Lambda → `AnomalyDetected` on the bus → session-starter Lambda → AgentCore Runtime, with idempotency on field + date. Replay is any `as_of` in the past.
-3. **Hazards.** `get_hail` (MRMS MESH max over the field for a date range, in mm; SPC reports within 10 km), `get_drought` (USDM county category with a written rule), and historical NWS warnings from the Iowa Environmental Mesonet archive. Optional: a daily Lambda that opens hail watches.
-4. **Field context.** `get_soil_profile` (Soil Data Access: map units, horizons, sandy flag, soil-zone polygons), terrain low spots (3DEP 1 m), crop history and same-crop neighbors from USDA CSB 2018–2025 (EPSG:5070; cache per farm), `get_disease_reports` (EDDMapS), and economics (NASS key if available, else crop defaults). Fills `FieldContext`.
-5. **Scorer, catalog, impact, agent reasoning.**
-   - `catalog/conditions.json`: priors by crop, stage and irrigation; weights per `weight_key` with a cited reason. **Caleb reviews the agronomy.**
-   - `score_hypotheses`: log-odds; marks `ruled_out` below 0.05 and `likely` above 0.6.
-   - `estimate_impact` from `catalog/loss_tables.json`: hail by growth stage, water stress around silking.
-   - Specialists return `contracts.SpecialistResponse` evidence items; the supervisor calls the scorer and never states its own confidence. Add an environment/agronomy split if time allows.
-6. **Gateway tools.** One Lambda handler that dispatches on the tool name (strip the `target___` prefix) to `registry.BY_NAME[...]`. Tool schemas are generated from each entry's `input_model`. Gateway with IAM inbound auth (spike findings 20–24). `toolset.tools_for(backend)` returns local functions or a SigV4-signed MCP client (finding 34) behind `FIELDWATCH_TOOLS_BACKEND`, falling back to local if the Gateway is unreachable.
-7. **Agent on Runtime.**
-   - Create the AgentCore CLI project in `agent/cloud/agentcore/` (CodeZip, no `mcp.exa.ai`), deploying `app.py`'s start/reply entrypoint.
-   - Sessions behind `FIELDWATCH_SESSIONS` (S3 session manager; AgentCore Memory if time allows).
-   - `runner.start/reply` call Runtime or local behind `FIELDWATCH_AGENT_BACKEND`; on error they fall back to local and say so in the result's `backend`.
-   - Turn on tracing.
-8. **Approvals.**
-   - Approval records (local file or `fw-approvals`) created when an interrupt asks.
-   - Decisions are recorded only by the reply path and only from the number that was asked; they expire.
-   - "Already decided by …" for a second answer.
-   - Write tools act at most once per approval.
-   - The work order is really delivered: a text to the assignee via WS9.
-9. **Notifications.**
-   - Turn `sms.py` into a `notify` package with the same `send()`/inbound interface: providers (Twilio, TextBelt, SNS, none; End User Messaging stub), message records and `MessageSent`/`MessageReceived` events, idempotency keys.
-   - Rules:
-     - quiet hours with deferral, daily cap, opt-in per person, STOP/START/HELP;
-     - people with roles (farmer, family delegate, repairs) so work orders reach the repair person;
-     - reply intents (YES/NO/MORE/ASK/PHOTO/free text) matched to the message they answer.
-10. **Web app as client.** The watcher calls WS2's trigger. ASK and replies go through WS7's runner. State goes through `store.py` (local JSON or DynamoDB behind `FIELDWATCH_STORE`). The phone panel shows which backend ran each step. Add the plan's report view (reveal slider, checked list, dollar range, approve/decline) and work-order view. Keep the current map and phone UI.
-11. **Evaluation + hero scenes.** Pick the hero and secondary scenes: a summer 2026 pivot or hail problem with clear passes before and after, a healthy field, and an end-of-season field. Record them in `docs/hero-scenes.md`. Then `agent/eval/` runs `contracts.Scenario` files end to end in local mode (cloud mode if ready) and reports pass/fail per scenario.
+   It should flag a real summer problem and stay quiet on healthy and end-of-season fields. No web or AWS-SDK imports in the core (S3 writes go through a small injected writer). Replace `registry.analyze_field`.
+2. **Scene pipeline + replay:** SQS `fw-scene-queue` → scene filter Lambda (tile index lookup, cloud rule, idempotency) → Step Functions Express (Map over fields: load inputs → analyze, calling WS1's `analyze` → decide) → `SceneAnalyzed` / `AnomalyDetected` on the bus. Plus a replay Lambda that sends a historical STAC item into the same queue (with hail backfill events), and a reset Lambda. Specs: "Imagery pipeline", "Replay correctness". The scheduled Earth Search check uses EventBridge Scheduler.
+3. **Hazards:** `get_hail` (MRMS MESH in mm via GDAL, SPC reports within 10 km), `get_drought` (Drought Monitor county percentages + a written rule), historical warnings from the Iowa Environmental Mesonet. Plus the hail-watch pipeline: SQS queue in us-west-2 subscribed to the MRMS topic in us-east-1 (no us-east-1 resources) → hail filter Lambda → watches in `fw-watches` + `WatchOpened`. Plus the drought poller.
+4. **Field context functions:**
+   - `get_soil_profile` (Soil Data Access: map units, horizons, sandy flag, zone polygons);
+   - terrain low spots (3DEP 1 m);
+   - crop history and same-crop neighbors from USDA CSB 2018–2025 (EPSG:5070; cache per farm);
+   - `get_disease_reports` (EDDMapS);
+   - economics (NASS if a key is set, else crop defaults).
+
+   Pure functions returning contract models; WS15 calls them from the workflow.
+5. **Scorer, catalog, impact, agent reasoning:**
+   - `catalog/conditions.json`: priors and weights with cited reasons; **Caleb reviews the agronomy**.
+   - `score_hypotheses`: log-odds; ruled out below 0.05, likely above 0.6.
+   - `estimate_impact` from `catalog/loss_tables.json`.
+   - Specialists return `contracts.SpecialistResponse` evidence items; the supervisor calls the scorer and never states its own confidence; the plan's roster (imagery, environment, agronomy). Includes the fast path (R1).
+6. **Gateway + tools:** one Lambda handler that dispatches on the tool name (strip `target___`) to `registry.BY_NAME`. A script generates the Gateway tool schemas from each entry's `input_model`. CDK for the Lambda, Gateway (IAM inbound auth) and target (spike findings 20–24). The two OpenAPI targets (drought, NASS) if time allows. `toolset.py` gives the agent a SigV4-signed MCP client for the Gateway (finding 34).
+7. **Agent on Runtime:**
+   - AgentCore CLI project in `agent/cloud/agentcore/` (CodeZip; remove `mcp.exa.ai`) deploying `agent/app.py` with start/resume per the specs' "Agent service"; tools from `toolset.py`.
+   - S3 session manager so interrupts survive between invocations; AgentCore Memory (episodic) if time allows.
+   - `InvestigationProgress`/`InvestigationConcluded` events.
+   - Session-starter Lambda + EventBridge rules (`AnomalyDetected`, `ApprovalRecorded`, `ReplyReceived`, `PhotoReceived`, `ActionCompleted`).
+   - Tracing on.
+8. **Approvals + write tools + policy:**
+   - `approvals.py`: create a pending record when an interrupt asks; `record_decision()` for the reply handler and report page (only from the person asked, unexpired, conditional on pending, "already decided by …").
+   - `actions.py`: work order, scout pin, insurance draft. At most one action per approval; the work order is delivered as a text to the assignee via WS9's send.
+   - Write-tool registry entries with required `approval_id`/`investigation_id`; Cedar policy for the Gateway if time allows.
+9. **Notifications:** turn `sms.py` into `fieldwatch/notify/`.
+   - **Send Lambda** (T17): opt-out, idempotency, signed link, quiet hours with Scheduler deferral, daily cap, providers (Twilio, mirror-only, End User Messaging stub), `fw-messages`, `MessageSent`.
+   - **Reply handler** (T18): the **Twilio webhook arrives through the API** (verify the signature), dedupe, person lookup, intents, STOP/HELP, approval matching via WS8's `record_decision`, `ReplyReceived` / `ApprovalRecorded` / `MessageReceived`.
+   - People with roles, so work orders reach the repairs person.
+11. **Evaluations + hero scenes:** pick the scenes in `docs/hero-scenes.md`; `agent/eval/` runs `contracts.Scenario` files through replay end to end and reports pass/fail; AgentCore Evaluations if time allows.
+12. **Web API (T27):** API Gateway HTTP API + Lambda route groups. It serves:
+    - the specs' `/v1` routes (onboarding fields, farms/fields, people, reports → `ReportView`, approval decisions, uploads, work orders, overview, investigations, replay/reset, dashboard auth, mirror reply);
+    - **the same JSON shapes as today's `agent/web/server.py` `/api/...` routes** (create farm, get farm with thread, check now, ask, reply, field images, status), backed by DynamoDB/S3;
+    - `POST /sms/inbound` (calls WS9's reply handler).
+
+    It also handles link-token verification (HMAC key from SSM `/fieldwatch/link-signing-key`) and the error codes from the specs.
+13. **Live feed (T28):** AppSync Events API (namespace `fieldwatch`, channels `/farms/{farm_id}/feed` and `/farms/{farm_id}/phone`; IAM publish; subscribe with an API key or a Lambda authorizer on the dashboard token). The **projector** Lambda maps bus events to `FeedMessage`s and is the only publisher. Include a small Node or browser test subscriber.
+14. **Front end on CloudFront (T29, T30, T33):** move the UI to `web/` as static files on S3 + CloudFront (origin access control).
+    - `config.js` with the API URL and AppSync endpoint, generated at deploy.
+    - Keep today's map, drawing and phone-panel UX; the phone panel subscribes to AppSync instead of polling.
+    - Add the dashboard pieces (scan sweep, investigation panel with hypotheses and evidence cards), the **report page** (reveal slider, checked list, dollar range, approve/decline) and the **work-order page**, following the UI rules in `docs/core-features.md`.
+15. **Context builder workflow (T08):** Step Functions Standard, started by the API after fields are saved. A Map over fields runs LoadBoundary (tile index into `fw-tile-index`), then parallel stages calling WS4 functions (stubs until they land) and WS1's baseline, each writing its own part of `fw-field-context`. Partial failures are allowed; field `status` → `ready`.
 
 ## Checkpoints
 
 | When | Must be merged and shown |
 | --- | --- |
-| +0:45 | WS0 merged (this branch): contracts, samples, registry, switches, CDK skeleton, CI. Account/region and IAM access settled; DataPlane deployed |
-| +3h | WS1 indices + replay on a hero date · WS5 scorer ranks the sample evidence correctly · WS7 today's agent on Runtime behind the switch · WS9 send/reply with rules and the phone mirror |
-| +6h | WS1 regions + gates · WS3/WS4 hail, drought, soil live · WS6 Gateway serving registry tools · WS8 approval records + real work-order text · WS10 runner + store wired |
-| +9h | Hero scenario end to end in local **and** cloud mode · WS11 scenarios passing in local mode · WS2 cloud trigger if green |
-| ~6:30 | Feature freeze. Demo cloud mode if green, else local. Record a backup run |
+| +0:45 | PR #1 merged; Kurt and Aaron have AWS access; repo variables set |
+| +3h | API + front end serving today's map from CloudFront with farms in DynamoDB · analyzer indices on a summer date · scorer ranks the sample · notify send Lambda with rules · agent on Runtime answering a start request |
+| +6h | Replay → scene pipeline → `AnomalyDetected` → session starter → agent → message on the phone mirror, all in AWS · Gateway serving registry tools · approvals + work order delivered · hazards and soil live |
+| +9h | Hero scenario end to end in AWS with the report page · evaluation scenarios run · feed drives the dashboard |
+| ~6:30 | Feature freeze. If the full path isn't green, demo the fallback branch. Record a backup run either way |
 
 ## Prompt template (paste into the workstream's Claude Code session)
 
-> You are working on FieldWatch (repo FarmU), workstream **N: <name>**. Read `CLAUDE.md`, `docs/decisions.md`, `docs/spike-findings.md`, and the plan sections listed for workstream N in `docs/workstreams.md` (plan docs are in `docs/`). Decisions and spike findings override the plan docs. Build against `agent/fieldwatch/contracts.py` and the samples in `agent/fixtures/contracts/`; do not change contracts. Edit only the paths listed for workstream N. Goal: <paste the goal>. First write the checks and tests for that goal (no network or AWS in unit tests; mark live tests `@pytest.mark.live`), then propose a plan, then implement. Run `python -m pytest tests -q -m "not live"` from `agent/` before finishing. If the goal needs AWS: region us-west-2; add your stack to `infra/` but do not deploy unless you are Caleb.
+> You are working on FieldWatch (repo FarmU), workstream **N: <name>**. Read `CLAUDE.md`, `docs/decisions.md`, `docs/spike-findings.md`, and the plan sections listed for workstream N in `docs/workstreams.md` (plan docs are in `docs/`). Decisions and spike findings override the plan docs. Build against `agent/fieldwatch/contracts.py` and the samples in `agent/fixtures/contracts/`; do not change contracts. Edit only the paths listed for workstream N. Goal: <paste the goal>. First write the checks and tests for that goal (no network or AWS in unit tests: mock boto3 with `moto` or fakes; mark live tests `@pytest.mark.live`), then propose a plan, then implement. Before finishing, run `python -m pytest tests -q -m "not live"` from `agent/` and, if you touched `infra/`, an offline `cdk synth`. Do not deploy anything; Caleb deploys.

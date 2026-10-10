@@ -534,6 +534,66 @@ class FeedMessage(Contract):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+# ---------- web API views (WS12 serves, WS14 renders) ----------
+
+
+class ReportField(Contract):
+    field_id: str
+    name: str
+    acres: float
+
+
+class ReportOverlays(Contract):
+    true_color_url: str
+    health_url: str
+    mask_url: str | None = None
+    bounds: Bounds
+
+
+class ReportSummary(Contract):
+    headline: str
+    detail: str
+
+
+class CheckedItem(Contract):
+    condition: ConditionId
+    label: str = Field(description="Plain words, e.g. 'Pivot not watering'")
+    status: Literal["open", "likely", "ruled_out"]
+    reason: str
+
+
+class ReportAction(Contract):
+    approval_id: str
+    label: str
+    status: Literal["pending", "approved", "declined", "expired"]
+    decided_by: str | None = None
+
+
+class ReportView(Contract):
+    """GET /v1/reports/{investigation_id}: the field report page."""
+
+    field: ReportField
+    scene_date: ISODate
+    overlays: ReportOverlays
+    summary: ReportSummary
+    checked: list[CheckedItem]
+    impact: ImpactEstimate | None = None
+    action: ReportAction | None = None
+    navigate_url: str = Field(description="Opens the phone's maps app at the problem area")
+    updated_since_sent: bool = False
+
+
+class WorkOrderView(Contract):
+    """GET /v1/work-orders/{action_id}: the repair person's page."""
+
+    action_id: str
+    field_name: str
+    pin: LonLat
+    instructions: str
+    status: Literal["sent", "done"]
+    navigate_url: str
+
+
 # ---------- evaluation ----------
 
 
@@ -583,5 +643,7 @@ FIXTURE_MODELS: dict[str, type[Contract]] = {
     "resume_investigation": ResumeInvestigation,
     "agent_step": AgentStep,
     "feed_message": FeedMessage,
+    "report_view": ReportView,
+    "work_order_view": WorkOrderView,
     "scenario": Scenario,
 }

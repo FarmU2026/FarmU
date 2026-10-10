@@ -29,17 +29,12 @@ DATA = ROOT / "data"
 OLLAMA_HOST = os.getenv("FIELDWATCH_OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("FIELDWATCH_OLLAMA_MODEL", "qwen3:8b")
 
-# Backend switches (docs/decisions.md D1). "local" is today's in-process code and the demo fallback;
-# each cloud value is wired up by its workstream. main must pass CI with every switch on "local".
-SWITCHES = {
-    "agent": os.getenv("FIELDWATCH_AGENT_BACKEND", "local"),  # local | runtime       (workstream 7)
-    "tools": os.getenv("FIELDWATCH_TOOLS_BACKEND", "local"),  # local | gateway       (workstream 6)
-    "store": os.getenv("FIELDWATCH_STORE", "local"),  # local | dynamo                (workstream 10)
-    "sessions": os.getenv("FIELDWATCH_SESSIONS", "local"),  # local | s3 | memory     (workstream 7)
-    "trigger": os.getenv("FIELDWATCH_TRIGGER", "local"),  # local | cloud            (workstream 2)
-}
-
-# Cloud endpoints, set once the matching stack is deployed. Unset means the cloud path is unavailable.
+# Cloud resources (docs/decisions.md D1). Lambdas get these from their CDK stack's environment;
+# local runs set them in agent/.env. Unset values mean that resource isn't available locally.
+TOOLS_BACKEND = os.getenv("FIELDWATCH_TOOLS_BACKEND", "local")  # local | gateway (WS6): tools in-process or via Gateway
+SESSIONS_BUCKET = os.getenv("FIELDWATCH_SESSIONS_BUCKET", "")  # S3 session storage on Runtime (WS7)
+APPSYNC_HTTP_ENDPOINT = os.getenv("FIELDWATCH_APPSYNC_HTTP", "")  # live feed publish endpoint (WS13)
+LINK_KEY_PARAM = os.getenv("FIELDWATCH_LINK_KEY_PARAM", "/fieldwatch/link-signing-key")
 RUNTIME_ARN = os.getenv("FIELDWATCH_RUNTIME_ARN", "")
 GATEWAY_URL = os.getenv("FIELDWATCH_GATEWAY_URL", "")
 TABLE_PREFIX = os.getenv("FIELDWATCH_TABLE_PREFIX", "fw-")

@@ -22,9 +22,9 @@ def test_no_orphan_fixtures():
     assert not orphans, f"samples without a contract: {orphans}"
 
 
-def test_switches_default_to_local():
-    """main must run with every capability local (docs/decisions.md D1)."""
-    assert config.SWITCHES == {k: "local" for k in config.SWITCHES}
+def test_tools_default_to_in_process():
+    """Unit tests and local runs never reach for the Gateway unless asked to."""
+    assert config.TOOLS_BACKEND == "local"
 
 
 def test_registry_entries_are_well_formed():

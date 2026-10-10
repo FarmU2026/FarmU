@@ -20,6 +20,14 @@
 /agent/fieldwatch/hazards/          @kdumbl
 /agent/fieldwatch/context/          @kdumbl
 
-# Infra and deploy pipeline: Caleb deploys; repo owner sees workflow changes.
+# Cloud handlers, front end, infra: built by Claude agents, reviewed and deployed by Caleb.
+# (Later lines win, so Kurt's specific folders come after these.)
+/agent/cloud/                       @Caleb-Kelly-25
+/web/                               @Caleb-Kelly-25
 /infra/                             @Caleb-Kelly-25
 /.github/                           @Caleb-Kelly-25 @kdumbl
+
+/agent/cloud/lambdas/hazards/       @kdumbl
+/agent/cloud/lambdas/notify/        @kdumbl
+/infra/stacks/hazards.py            @kdumbl @Caleb-Kelly-25
+/infra/stacks/notifications.py      @kdumbl @Caleb-Kelly-25
