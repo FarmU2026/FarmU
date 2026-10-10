@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.agentcore.aws.dev/v1/agentcore.json",
+  "name": "FieldWatch",
+  "version": 1,
+  "managedBy": "CDK",
+  "tags": {
+    "agentcore:created-by": "agentcore-cli",
+    "agentcore:project-name": "FieldWatch",
+    "project": "fieldwatch"
+  },
+  "runtimes": [
+    {
+      "name": "fieldwatch_agent",
+      "description": "FieldWatch supervisor and specialists (Strands) - agent/app.py",
+      "build": "CodeZip",
+      "entrypoint": "app.py",
+      "codeLocation": "app/fieldwatch_agent/",
+      "runtimeVersion": "PYTHON_3_12",
+      "networkMode": "PUBLIC",
+      "protocol": "HTTP",
+      "instrumentation": {
+        "enableOtel": true
+      },
+      "envVars": [
+        { "name": "FIELDWATCH_SSM_BOOTSTRAP", "value": "1" },
+        { "name": "FIELDWATCH_PROVIDER", "value": "bedrock" },
+        { "name": "FIELDWATCH_MODEL", "value": "us.anthropic.claude-haiku-4-5-20251001-v1:0" },
+        { "name": "FIELDWATCH_TOOLS_BACKEND", "value": "gateway" },
+        { "name": "FIELDWATCH_EVENT_BUS", "value": "fieldwatch" },
+        { "name": "FIELDWATCH_TABLE_PREFIX", "value": "fw-" }
+      ],
+      "additionalPolicies": ["policies/runtime-access.json"],
+      "lifecycleConfiguration": {
+        "idleRuntimeSessionTimeout": 1800,
+        "maxLifetime": 28800
+      },
+      "tags": {
+        "project": "fieldwatch"
+      }
+    }
+  ],
+  "memories": [],
+  "knowledgeBases": [],
+  "credentials": [],
+  "evaluators": [],
+  "onlineEvalConfigs": [],
+  "agentCoreGateways": [],
+  "policyEngines": [],
+  "configBundles": [],
+  "abTests": [],
+  "harnesses": [],
+  "datasets": [],
+  "capacityProviders": [],
+  "payments": []
+}
