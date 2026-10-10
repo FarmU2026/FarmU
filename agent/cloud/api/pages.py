@@ -164,7 +164,7 @@ def decide(req: Request):
         raise ApiError("ALREADY_DECIDED", f"Already {status}" + (f" by {who}" if who else "")
                        + (f" at {appr['decided_at']}" if appr.get("decided_at") else ""))
     decision = "approved" if body.decision == "approve" else "declined"
-    _approvals.record_decision(approval_id, decision, decided_by=appr.get("sent_to_person_id") or "web", channel="web")
+    _approvals.record_decision(approval_id, decision, appr.get("sent_to_person_id") or "web", "web")
     return {"status": decision}
 
 

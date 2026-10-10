@@ -1,55 +1,73 @@
-"""Adapter to the approvals lane (WS8, fieldwatch/approvals.py), which may not exist yet.
+"""Adapter to the approvals lane (WS8, fieldwatch/approvals.py).
 
-Expected interface (WS8):
+The real interface:
 
-    record_decision(approval_id: str, decision: "approved" | "declined", decided_by: str,
-                    channel: "sms" | "web" | "voice") -> Approval | dict
-        Conditional write on fw-approvals (status == "pending", unexpired, decided_by must be the
-        person asked unless channel == "web" with a valid report token) and emits ApprovalRecorded.
-        Raises an exception whose class name contains "AlreadyDecided" (with .approval or
-        .decided_by / .decided_at attributes if possible), "Expired", or "NotFound".
+    record_decision(approval_id, decision, decided_by_person_id, channel, from_phone=None) -> Approval
 
-The API maps those to ALREADY_DECIDED (409) and NOT_FOUND (404); without the module it answers 501.
+It does the conditional write on fw-approvals (pending, unexpired, asked of that person; a text reply must
+come from the number it was sent to) and emits ApprovalRecorded. It raises FieldwatchError with a `.code`;
+this adapter maps those to the API's error body:
+
+    NOT_FOUND        -> 404 NOT_FOUND
+    POLICY_DENIED    -> 403 POLICY_DENIED
+    ALREADY_DECIDED  -> 409 ALREADY_DECIDED  (message says who and when)
+    EXPIRED          -> 409 ALREADY_DECIDED  (the web page only knows the spec's codes; the message says expired)
+    INVALID_INPUT    -> 400 INVALID_INPUT
+
+If fieldwatch.approvals can't be imported the API answers 501 NOT_IMPLEMENTED (and the SMS path passes the
+reply on as ReplyReceived).
 """
 from __future__ import annotations
 
 import importlib
+import logging
 from typing import Any
 
 from ._http import ApiError
 
+log = logging.getLogger("fieldwatch.api")
+
 
 def module():
+    """fieldwatch.approvals, or None when it can't be imported."""
     try:
-        return importlib.import_module("fieldwatch.approvals")
-    except ModuleNotFoundError as e:
-        if e.name in ("fieldwatch.approvals",):
-            return None
-        raise
+        mod = importlib.import_module("fieldwatch.approvals")
+    except ImportError:
+        log.warning("fieldwatch.approvals is not importable", exc_info=True)
+        return None
+    return mod if hasattr(mod, "record_decision") else None
 
 
 def available() -> bool:
-    mod = module()
-    return bool(mod and hasattr(mod, "record_decision"))
+    return module() is not None
 
 
-def record_decision(approval_id: str, decision: str, decided_by: str, channel: str) -> Any:
+def _api_error(e: Exception) -> ApiError:
+    code = getattr(e, "code", "")
+    message = getattr(e, "message", None) or str(e)
+    retryable = bool(getattr(e, "retryable", False))
+    if code == "ALREADY_DECIDED":
+        message = message[:1].upper() + message[1:]  # "already approved by per_x at <time>"
+        return ApiError("ALREADY_DECIDED", message, 409, retryable)
+    if code == "EXPIRED":
+        return ApiError("ALREADY_DECIDED", "This request expired before a decision was made", 409)
+    if code == "NOT_FOUND":
+        return ApiError("NOT_FOUND", "No such approval", 404)
+    if code == "POLICY_DENIED":
+        return ApiError("POLICY_DENIED", message, 403)
+    if code == "INVALID_INPUT":
+        return ApiError("INVALID_INPUT", message, 400)
+    return ApiError("INTERNAL", message or "Could not record the decision", 500, retryable)
+
+
+def record_decision(approval_id: str, decision: str, person_id: str, channel: str, from_phone: str | None = None) -> Any:
+    """Record `decision` ("approved" | "declined") as `person_id` over `channel` ("sms" | "web" | "voice")."""
     mod = module()
-    if mod is None or not hasattr(mod, "record_decision"):
+    if mod is None:
         raise ApiError("NOT_IMPLEMENTED", "Approvals are not available yet", 501)
     try:
-        return mod.record_decision(approval_id=approval_id, decision=decision, decided_by=decided_by,
-                                   channel=channel)
-    except Exception as e:  # noqa: BLE001 - mapped by name so we don't depend on WS8's classes
-        name = type(e).__name__
-        if "AlreadyDecided" in name or "Conflict" in name:
-            appr = getattr(e, "approval", None)
-            who = getattr(e, "decided_by", None) or (appr.get("decided_by") if isinstance(appr, dict) else getattr(appr, "decided_by", None))
-            when = getattr(e, "decided_at", None) or (appr.get("decided_at") if isinstance(appr, dict) else getattr(appr, "decided_at", None))
-            msg = f"Already decided by {who}" + (f" at {when}" if when else "") if who else str(e) or "Already decided"
-            raise ApiError("ALREADY_DECIDED", msg) from None
-        if "Expired" in name:
-            raise ApiError("ALREADY_DECIDED", "This request expired before a decision was made") from None
-        if "NotFound" in name or isinstance(e, KeyError):
-            raise ApiError("NOT_FOUND", "No such approval") from None
+        return mod.record_decision(approval_id, decision, person_id, channel, from_phone=from_phone)
+    except Exception as e:  # noqa: BLE001 - FieldwatchError carries .code; anything else is a bug
+        if hasattr(e, "code") and hasattr(e, "body"):
+            raise _api_error(e) from None
         raise

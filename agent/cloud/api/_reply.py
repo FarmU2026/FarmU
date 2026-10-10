@@ -22,7 +22,7 @@ from boto3.dynamodb.conditions import Key
 from fieldwatch import contracts as C
 
 from . import _approvals, _aws, store
-from ._http import log
+from ._http import ApiError, log
 
 YES, NO = {"YES", "Y"}, {"NO", "N"}
 KEYWORDS = {"MORE": "more", "PHOTO": "photo", "CALL": "call", "HELP": "help",
@@ -108,8 +108,16 @@ def fallback(from_phone: str, body: str, channel: str) -> dict:
         if appr:
             approval_id, investigation_id = appr["approval_id"], appr.get("investigation_id")
             if _approvals.available():
-                _approvals.record_decision(approval_id, "approved" if intent == "yes" else "declined",
-                                           decided_by=person_id, channel="sms")
+                try:
+                    _approvals.record_decision(approval_id, "approved" if intent == "yes" else "declined",
+                                               person_id, "sms", from_phone=from_phone)
+                except ApiError as e:
+                    # Someone else answered first, it expired, or the number didn't match: not a server error.
+                    if e.status >= 500:
+                        raise
+                    log.warning("approval %s not recorded: %s %s", approval_id, e.code, e.message)
+                    return {"status": "approval_not_recorded", "intent": intent, "approval_id": approval_id,
+                            "code": e.code, "message": e.message}
                 return {"status": "approval_recorded", "intent": intent, "approval_id": approval_id}
             log.warning("approvals module missing; passing %s on as ReplyReceived", approval_id)
     if investigation_id is None:

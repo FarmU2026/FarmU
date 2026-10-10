@@ -96,14 +96,32 @@ def aws(monkeypatch):
         ns.sfn = boto3.client("stepfunctions", region_name=REGION)
         ns.table = lambda short: ns.ddb.Table("fw-" + short)
 
+        # The API calls the real fieldwatch.approvals; point it at the same moto table the pages read, and
+        # collect its ApprovalRecorded events next to the API's own (tests/conftest.py resets both).
+        from fieldwatch import approvals
+
+        approvals.use_store(approvals.DynamoStore(ns.ddb, prefix="fw-"))
+        approvals.set_event_sink(lambda kind, detail: events.append((kind, detail)))
+
         def queue_messages():
             out = sqs.receive_message(QueueUrl=queue_url, MaxNumberOfMessages=10).get("Messages", [])
             return [json.loads(m["Body"]) for m in out]
 
         ns.queue_messages = queue_messages
         yield ns
+        approvals.use_store(None)
+        approvals.set_event_sink(None)
         _aws.reset_clients()
         links.clear_key_cache()
+
+
+def put_approval(aws, approval_id: str = "apr_1", **overrides) -> dict:
+    """A valid fw-approvals row (fieldwatch.contracts.Approval), pending and unexpired unless overridden."""
+    item = {"approval_id": approval_id, "investigation_id": "inv_1", "action_type": "work_order",
+            "summary": "Send a repair ticket", "sent_to_person_id": "per_4025550100", "status": "pending",
+            "expires_at": "2999-01-01T00:00:00Z", **overrides}
+    aws.table("approvals").put_item(Item=item)
+    return item
 
 
 def event(method: str, path: str, body=None, *, query: dict | None = None, headers: dict | None = None,

@@ -5,8 +5,8 @@ import types
 
 import pytest
 
-from cloud.api import _reply, dashboard, farms, pages, routes, sms_inbound
-from test_api_helpers import BUCKET, NORTH_PIVOT_LATLON, aws, call, event, put_analysis, signup  # noqa: F401
+from cloud.api import _approvals, _reply, dashboard, farms, pages, routes, sms_inbound
+from test_api_helpers import BUCKET, NORTH_PIVOT_LATLON, aws, call, event, put_analysis, put_approval, signup  # noqa: F401
 
 FARM = "4025550100"
 FIELD = f"fld_{FARM}_north-pivot"
@@ -200,29 +200,48 @@ def test_reply_stop_mutes(aws):
     assert farm["muted"] is False
 
 
-def test_reply_yes_with_pending_approval_and_no_approvals_module(aws):
+def test_reply_yes_records_the_approval_through_the_approvals_module(aws):
     signup(farms)
-    aws.table("approvals").put_item(Item={
-        "approval_id": "apr_1", "investigation_id": "inv_1", "sent_to_person_id": f"per_{FARM}", "status": "pending",
-        "expires_at": "2999-01-01T00:00:00Z", "summary": "Send a repair ticket"})
+    put_approval(aws, "apr_1", investigation_id="inv_1")
+    _, farm, _ = call(farms, "POST", f"/api/farms/{FARM}/reply", {"text": "Yes"})
+    assert farm["reply"] == {"status": "approval_recorded", "intent": "yes", "approval_id": "apr_1"}
+    row = aws.table("approvals").get_item(Key={"approval_id": "apr_1"})["Item"]
+    assert row["status"] == "approved" and row["decided_by"] == f"per_{FARM}" and row["channel"] == "sms"
+    recorded = [e[1] for e in aws.events if e[0] == "ApprovalRecorded"]
+    assert [(r["approval_id"], r["decision"], r["channel"]) for r in recorded] == [("apr_1", "approved", "sms")]
+    assert "ReplyReceived" not in [e[0] for e in aws.events]  # one YES, one resume
+
+
+def test_reply_no_declines(aws):
+    signup(farms)
+    put_approval(aws, "apr_1")
+    _, farm, _ = call(farms, "POST", f"/api/farms/{FARM}/reply", {"text": "NO"})
+    assert farm["reply"]["status"] == "approval_recorded"
+    assert aws.table("approvals").get_item(Key={"approval_id": "apr_1"})["Item"]["status"] == "declined"
+
+
+def test_reply_yes_when_the_approval_was_already_taken_is_not_an_error(aws, monkeypatch):
+    signup(farms)
+    put_approval(aws, "apr_1")
+    # The pending lookup sees it pending; the conditional write finds it decided (someone else won the race).
+    monkeypatch.setattr(_reply, "_pending_approval", lambda person_id: {"approval_id": "apr_1", "investigation_id": "inv_1"})
+    aws.table("approvals").update_item(Key={"approval_id": "apr_1"}, UpdateExpression="SET #s = :a, decided_by = :d",
+                                       ExpressionAttributeNames={"#s": "status"},
+                                       ExpressionAttributeValues={":a": "approved", ":d": "per_brother"})
+    _, farm, _ = call(farms, "POST", f"/api/farms/{FARM}/reply", {"text": "YES"})
+    assert farm["reply"]["status"] == "approval_not_recorded" and farm["reply"]["code"] == "ALREADY_DECIDED"
+    assert "per_brother" in farm["reply"]["message"]
+    assert [e[0] for e in aws.events] == ["MessageReceived"]  # no ReplyReceived, no second ApprovalRecorded
+
+
+def test_reply_yes_falls_back_to_reply_received_when_approvals_cannot_be_imported(aws, monkeypatch):
+    monkeypatch.setattr(_approvals, "module", lambda: None)
+    signup(farms)
+    put_approval(aws, "apr_1", investigation_id="inv_1")
     call(farms, "POST", f"/api/farms/{FARM}/reply", {"text": "Yes"})
     rr = [e[1] for e in aws.events if e[0] == "ReplyReceived"][0]
     assert rr["intent"] == "yes" and rr["approval_id"] == "apr_1" and rr["investigation_id"] == "inv_1"
-
-
-def test_reply_yes_uses_record_decision_when_available(aws, monkeypatch):
-    calls = []
-    fake = types.ModuleType("fieldwatch.approvals")
-    fake.record_decision = lambda **kw: calls.append(kw) or {"status": kw["decision"]}
-    monkeypatch.setitem(sys.modules, "fieldwatch.approvals", fake)
-    signup(farms)
-    aws.table("approvals").put_item(Item={
-        "approval_id": "apr_1", "investigation_id": "inv_1", "sent_to_person_id": f"per_{FARM}", "status": "pending",
-        "expires_at": "2999-01-01T00:00:00Z"})
-    _, farm, _ = call(farms, "POST", f"/api/farms/{FARM}/reply", {"text": "NO"})
-    assert calls == [{"approval_id": "apr_1", "decision": "declined", "decided_by": f"per_{FARM}", "channel": "sms"}]
-    assert farm["reply"]["status"] == "approval_recorded"
-    assert "ReplyReceived" not in [e[0] for e in aws.events]
+    assert aws.table("approvals").get_item(Key={"approval_id": "apr_1"})["Item"]["status"] == "pending"
 
 
 def test_reply_prefers_notify_inbound_module(aws, monkeypatch):

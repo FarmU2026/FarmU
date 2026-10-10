@@ -1,15 +1,14 @@
 """Web API (WS12): /v1 routes (link-token pages and dashboard) against moto."""
 import json
-import sys
-import types
 from pathlib import Path
 
 import pytest
 
-from cloud.api import _aws, dashboard, farms, pages
+from cloud.api import _approvals, _aws, dashboard, farms, pages
+from cloud.api._http import ApiError
 from fieldwatch import contracts as C
 from fieldwatch import links
-from test_api_helpers import aws, call, put_analysis, signup  # noqa: F401
+from test_api_helpers import aws, call, put_analysis, put_approval, signup  # noqa: F401
 
 FARM = "4025550100"
 FIELD = f"fld_{FARM}_north-pivot"
@@ -36,9 +35,8 @@ def seeded(aws):
                       "source": "get_weather", "value": {"rain_mm_30d": 112}, "reason": "Rain over the last month was normal.",
                       "created_at": "2026-07-18T17:21:05Z"}],
     }))
-    aws.table("approvals").put_item(Item={
-        "approval_id": "apr_1", "investigation_id": INV, "sent_to_person_id": f"per_{FARM}", "status": "pending",
-        "summary": "Send Brother a repair ticket", "expires_at": "2999-01-01T00:00:00Z"})
+    put_approval(aws, "apr_1", investigation_id=INV, sent_to_person_id=f"per_{FARM}",
+                 summary="Send Brother a repair ticket")
     aws.table("actions").put_item(Item=_aws.to_ddb({
         "action_id": "act_1", "approval_id": "apr_1", "investigation_id": INV, "type": "work_order",
         "assignee_person_id": "per_brother", "pin": [-96.54, 42.1535], "status": "sent",
@@ -83,63 +81,84 @@ def test_report_missing_token_and_missing_report(seeded):
 # ---------- approval decisions ----------
 
 
-def test_decision_without_approvals_module_is_501(seeded):
+def test_decision_without_approvals_module_is_501(seeded, monkeypatch):
+    monkeypatch.setattr(_approvals, "module", lambda: None)  # the import-failure path
     got, body, _ = call(pages, "POST", "/v1/approvals/apr_1/decision", {"decision": "approve"},
                         query={"t": tok("report", INV)})
     assert got == 501 and body["error"]["code"] == "NOT_IMPLEMENTED"
 
 
-@pytest.fixture
-def fake_approvals(monkeypatch):
-    calls = []
-
-    class AlreadyDecidedError(Exception):
-        decided_by = "per_brother"
-        decided_at = "2026-07-18T18:00:00Z"
-
-    mod = types.ModuleType("fieldwatch.approvals")
-
-    def record_decision(**kw):
-        if kw["approval_id"] == "apr_race":
-            raise AlreadyDecidedError("taken")
-        calls.append(kw)
-        return {"status": kw["decision"]}
-
-    mod.record_decision = record_decision
-    monkeypatch.setitem(sys.modules, "fieldwatch.approvals", mod)
-    return calls
+def _row(aws, approval_id):
+    return aws.table("approvals").get_item(Key={"approval_id": approval_id})["Item"]
 
 
-def test_decision_records_via_approvals(seeded, fake_approvals):
+def test_decision_records_via_approvals(seeded):
     got, body, _ = call(pages, "POST", "/v1/approvals/apr_1/decision", {"decision": "decline", "reason": "busy"},
                         query={"t": tok("report", INV)})
     assert got == 200 and body == {"status": "declined"}
-    assert fake_approvals == [{"approval_id": "apr_1", "decision": "declined", "decided_by": f"per_{FARM}",
-                               "channel": "web"}]
+    row = _row(seeded, "apr_1")
+    assert (row["status"], row["decided_by"], row["channel"]) == ("declined", f"per_{FARM}", "web")
+    assert [(e[0], e[1]["approval_id"], e[1]["decision"], e[1]["channel"]) for e in seeded.events
+            if e[0] == "ApprovalRecorded"] == [("ApprovalRecorded", "apr_1", "declined", "web")]
 
 
-def test_decision_already_decided(seeded, fake_approvals):
-    seeded.table("approvals").put_item(Item={
-        "approval_id": "apr_2", "investigation_id": INV, "sent_to_person_id": "per_x", "status": "approved",
-        "decided_by": "per_x", "decided_at": "2026-07-18T18:00:00Z", "expires_at": "2999-01-01T00:00:00Z"})
+def test_decision_approve(seeded):
+    got, body, _ = call(pages, "POST", "/v1/approvals/apr_1/decision", {"decision": "approve"},
+                        query={"t": tok("report", INV)})
+    assert got == 200 and body == {"status": "approved"} and _row(seeded, "apr_1")["status"] == "approved"
+
+
+def test_decision_already_decided(seeded, monkeypatch):
+    put_approval(seeded, "apr_2", investigation_id=INV, sent_to_person_id="per_x", status="approved",
+                 decided_by="per_x", decided_at="2026-07-18T18:00:00Z", channel="sms")
     got, body, _ = call(pages, "POST", "/v1/approvals/apr_2/decision", {"decision": "approve"},
                         query={"t": tok("report", INV)})
     assert got == 409 and body["error"]["code"] == "ALREADY_DECIDED" and "per_x" in body["error"]["message"]
-    # Race: pending when read, decided inside record_decision.
-    seeded.table("approvals").put_item(Item={
-        "approval_id": "apr_race", "investigation_id": INV, "sent_to_person_id": "per_x", "status": "pending",
-        "expires_at": "2999-01-01T00:00:00Z"})
+    # Race: the page's read said pending, the conditional write inside record_decision finds it decided.
+    put_approval(seeded, "apr_race", investigation_id=INV, sent_to_person_id="per_x", status="approved",
+                 decided_by="per_brother", decided_at="2026-07-18T18:00:00Z", channel="sms")
+    monkeypatch.setattr(pages, "_approval_status", lambda a: "pending")
     got, body, _ = call(pages, "POST", "/v1/approvals/apr_race/decision", {"decision": "approve"},
                         query={"t": tok("report", INV)})
-    assert got == 409 and "per_brother" in body["error"]["message"]
+    assert got == 409 and body["error"]["code"] == "ALREADY_DECIDED"
+    assert "per_brother" in body["error"]["message"] and "2026-07-18T18:00:00Z" in body["error"]["message"]
 
 
-def test_decision_errors(seeded, fake_approvals):
+def test_decision_errors(seeded):
     q = {"t": tok("report", "inv_other")}
     assert call(pages, "POST", "/v1/approvals/apr_1/decision", {"decision": "approve"}, query=q)[0] == 403
     q = {"t": tok("report", INV)}
     assert call(pages, "POST", "/v1/approvals/apr_1/decision", {"decision": "maybe"}, query=q)[1]["error"]["code"] == "INVALID_INPUT"
     assert call(pages, "POST", "/v1/approvals/apr_9/decision", {"decision": "approve"}, query=q)[0] == 404
+    assert _row(seeded, "apr_1")["status"] == "pending"
+
+
+def test_decision_expired_is_conflict(seeded):
+    put_approval(seeded, "apr_old", investigation_id=INV, expires_at="2020-01-01T00:00:00Z")
+    got, body, _ = call(pages, "POST", "/v1/approvals/apr_old/decision", {"decision": "approve"},
+                        query={"t": tok("report", INV)})
+    assert got == 409 and body["error"]["code"] == "ALREADY_DECIDED" and "expired" in body["error"]["message"].lower()
+
+
+@pytest.mark.parametrize("args,status,code", [
+    (("apr_1", "approved", "per_other", "web"), 403, "POLICY_DENIED"),
+    (("apr_9", "approved", f"per_{FARM}", "web"), 404, "NOT_FOUND"),
+    (("apr_1", "maybe", f"per_{FARM}", "web"), 400, "INVALID_INPUT"),
+    (("apr_1", "approved", f"per_{FARM}", "carrier-pigeon"), 400, "INVALID_INPUT"),
+    (("apr_old", "approved", f"per_{FARM}", "web"), 409, "ALREADY_DECIDED"),
+])
+def test_adapter_maps_error_codes(seeded, args, status, code):
+    put_approval(seeded, "apr_old", investigation_id=INV, expires_at="2020-01-01T00:00:00Z")
+    with pytest.raises(ApiError) as exc:
+        _approvals.record_decision(*args)
+    assert (exc.value.status, exc.value.code) == (status, code)
+
+
+def test_adapter_sms_needs_the_sending_number(seeded):
+    with pytest.raises(ApiError) as exc:
+        _approvals.record_decision("apr_1", "approved", f"per_{FARM}", "sms")
+    assert exc.value.code == "INVALID_INPUT"
+    assert _approvals.record_decision("apr_1", "approved", f"per_{FARM}", "sms", from_phone="+14025550100").status == "approved"
 
 
 # ---------- uploads ----------

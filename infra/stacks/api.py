@@ -65,6 +65,7 @@ class Api(Stack):
             "FIELDWATCH_BUCKET": data.bucket.bucket_name,
             "FIELDWATCH_EVENT_BUS": data.bus.event_bus_name,
             "FIELDWATCH_TABLE_PREFIX": "fw-",
+            "FIELDWATCH_APPROVALS_BACKEND": "dynamo",  # fieldwatch/approvals.py: fw-approvals, not the local JSON file
             "FIELDWATCH_LINK_KEY_PARAM": "/fieldwatch/link-signing-key",
             "FIELDWATCH_SCENE_QUEUE_URL": _queue_url(queue_arn) if queue_arn else "",
             "FIELDWATCH_CONTEXT_SM_ARN": sm_arn,
