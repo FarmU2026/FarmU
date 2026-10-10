@@ -12,7 +12,8 @@ import requests
 from strands import tool
 from strands.types.tools import ToolContext, ToolResult
 
-from . import config
+from . import actions, approvals, config
+from .contracts import Approval
 
 CROP_DEFAULTS = {  # expected yield (bu/ac) and price ($/bu) when the farmer gave none
     "corn": (205, 4.20),
@@ -151,15 +152,58 @@ def estimate_loss(field_id: str, affected_acres: float, yield_loss_fraction: flo
 
 
 # ---------- write tools: every one of these needs a YES ----------
+# The question becomes a pending record in the approvals store (fieldwatch.approvals) and its approval_id rides in
+# the interrupt reason. On YES the tool calls fieldwatch.actions with that approval_id, so the same checks apply
+# here and behind the Gateway. In the cloud the reply handler records the decision before the agent resumes;
+# locally the farmer's reply to the interrupt is the decision and the tool records it.
 
 
-def _approve(tool_context: ToolContext, action: str, summary: str) -> str:
-    """Pause until a human replies. Returns 'YES' or 'NO'."""
+def _investigation_id(tool_context: ToolContext) -> str:
+    sm = getattr(tool_context.agent, "_session_manager", None)
+    sid = str(getattr(sm, "session_id", "") or "")
+    return sid.removeprefix("fieldwatch-") or "local"
+
+
+def _farmer_id() -> str:
+    farmer = _farm().get("farmer", {})
+    return str(farmer.get("id") or farmer.get("name") or "farmer")
+
+
+def _approve(tool_context: ToolContext, action_type: str, summary: str) -> Approval:
+    """Pause until the farmer answers; returns the approval record (status approved, declined or expired).
+
+    The approval id is derived from (investigation, type, summary), so the tool re-running when its interrupt
+    resumes finds the same record instead of asking again."""
+    inv = _investigation_id(tool_context)
+    farmer = _farmer_id()
+    aid = approvals.approval_id_for(inv, action_type, summary)
+    a = approvals.create_pending(inv, action_type, summary, farmer, approval_id=aid)
+    if a.status != "pending":
+        return a  # already answered (by the reply handler) or past saying
     answer = tool_context.interrupt(
-        name=f"approve_{action}",
-        reason={"action": action, "summary": summary},
+        name=f"approve_{action_type}",
+        reason={"action": action_type, "summary": summary, "approval_id": aid, "investigation_id": inv,
+                "sent_to_person_id": farmer},
     )
-    return str(answer).strip().upper()
+    a = approvals.get(aid) or a
+    if a.status == "pending":  # local harness: the reply to the interrupt is the decision
+        decision = "approved" if str(answer).strip().upper() == "YES" else "declined"
+        try:
+            a = approvals.record_decision(aid, decision, farmer, "web")
+        except approvals.FieldwatchError:
+            a = approvals.get(aid) or a
+    return a
+
+
+def _not_approved(a, what: str) -> str:
+    if a.status == "declined":
+        return f"Farmer declined. Do not send the {what}."
+    return f"Not sent: the approval is {a.status}. Ask again if it still matters."
+
+
+def _lon_lat(f: dict) -> tuple[float, float]:
+    lat, lon = _centroid(f)
+    return round(lon, 6), round(lat, 6)
 
 
 @tool(context=True)
@@ -167,9 +211,18 @@ def create_work_order(field_id: str, assignee: str, what_to_check: str, tool_con
     """Send a repair work order with a map pin to the person who does repairs. Requires farmer approval."""
     f = _field(field_id)
     summary = f"Send {assignee} a repair ticket for the {f['name']}: {what_to_check}"
-    if _approve(tool_context, "work_order", summary) != "YES":
-        return "Farmer declined. Do not send the work order."
-    order = {"id": f"wo-{date.today():%Y%m%d}-{f['id']}", "to": assignee, "field": f["name"], "check": what_to_check}
+    a = _approve(tool_context, "work_order", summary)
+    if a.status != "approved":
+        return _not_approved(a, "work order")
+    try:
+        act = actions.create_work_order(
+            approval_id=a.approval_id, investigation_id=a.investigation_id, assignee_person_id=assignee,
+            field_id=f["id"], field_name=f["name"], instructions=what_to_check, pin=_lon_lat(f),
+            farm_id=_farm().get("farm_id"))
+    except approvals.FieldwatchError as e:
+        return f"Not sent: {e.message}"
+    order = {"id": act.action_id, "to": assignee, "field": f["name"], "check": what_to_check,
+             "text_delivered": actions.delivery(act.action_id)["delivered"]}
     return f"Work order sent: {json.dumps(order)}"
 
 
@@ -178,9 +231,17 @@ def create_scout_pin(field_id: str, where: str, what_to_look_for: str, tool_cont
     """Drop a scouting pin with coordinates and what to look for. Requires farmer approval."""
     f = _field(field_id)
     summary = f"Scouting pin on the {f['name']} ({where}): look for {what_to_look_for}"
-    if _approve(tool_context, "scout_pin", summary) != "YES":
-        return "Farmer declined."
-    return f"Scouting pin sent for {f['name']}: {where}. Look for: {what_to_look_for}"
+    a = _approve(tool_context, "scout_pin", summary)
+    if a.status != "approved":
+        return _not_approved(a, "scouting pin")
+    try:
+        act = actions.create_scout_pin(
+            approval_id=a.approval_id, investigation_id=a.investigation_id, person_id=_farmer_id(),
+            pin=_lon_lat(f), what_to_check=f"{where}: {what_to_look_for}", field_name=f["name"],
+            farm_id=_farm().get("farm_id"))
+    except approvals.FieldwatchError as e:
+        return f"Not sent: {e.message}"
+    return f"Scouting pin sent for {f['name']}: {where}. Look for: {what_to_look_for}. (pin {act.action_id})"
 
 
 @tool(context=True)
@@ -188,8 +249,9 @@ def request_photo(field_id: str, where: str, tool_context: ToolContext) -> str:
     """Ask the farmer to snap a leaf photo near a spot when the satellite can't tell what's wrong."""
     f = _field(field_id)
     summary = f"Ask for a leaf photo from the {f['name']} near {where}"
-    if _approve(tool_context, "photo", summary) != "YES":
-        return "Farmer declined."
+    a = _approve(tool_context, "photo_request", summary)
+    if a.status != "approved":
+        return _not_approved(a, "photo request")
     return f"Photo request sent with upload link for {f['name']} ({where})."
 
 
