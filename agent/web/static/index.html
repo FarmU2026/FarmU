@@ -154,7 +154,7 @@ function show(farm) {
       <button class="secondary" onclick="ask('${f.id}')">Ask FieldWatch about this field</button></div>`;
   }).join('');
   $('thread').innerHTML = (farm.thread || []).map(m => {
-    const badge = m.sms ? (m.sms.ok ? ` · texted via ${m.sms.provider}` : ` · not texted (${esc(m.sms.detail || m.sms.provider)})`) : '';
+    const badge = (m.sms && m.sms.ok) ? ` · texted` : '';
     return `<div class="msg ${m.who}">${esc(m.text)}${m.who !== 'agent' ? `<time>${m.at.slice(11,16)}${badge}</time>` : ''}</div>`;
   }).join('');
   if (farm.muted) $('smsStatus').textContent = 'Texts are paused (farmer replied STOP). Reply START to resume.';
@@ -177,9 +177,8 @@ $('btnMore').onclick = () => call(`/api/farms/${farmId}/reply`, {text:'MORE'});
 $('btnCheck').onclick = () => call(`/api/farms/${farmId}/check`);
 
 fetch('/api/status').then(r => r.json()).then(st => {
-  $('smsStatus').textContent = st.sms_provider === 'none'
-    ? 'No SMS provider configured: this panel is the only copy of the texts. Set TWILIO_* in agent/.env to send real ones.'
-    : `Real texts go out via ${st.sms_provider}${st.sms_from ? ' from ' + st.sms_from : ''}. Reply from your phone with ASK, YES, NO, MORE or STOP.`;
+  $('smsStatus').textContent = st.sms_provider === 'none' ? ''
+    : `Texts go to your phone via ${st.sms_provider}. Reply there with ASK, YES, NO, MORE or STOP.`;
 });
 
 // reopen a farm from the URL hash
