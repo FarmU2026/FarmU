@@ -22,6 +22,9 @@ env = cdk.Environment(account=os.getenv("CDK_DEFAULT_ACCOUNT"), region=os.getenv
 data = DataPlane(app, "FieldWatch-DataPlane", env=env)
 Access(app, "FieldWatch-Access", data=data, env=env)
 
+from stacks.agent import Agent  # workstream 7
+Agent(app, "FieldWatch-Agent", data=data, env=env)
+
 # Workstream stacks go here, each receiving `data` for the shared bucket, tables and bus, e.g.:
 # from stacks.hazards import Hazards
 # Hazards(app, "FieldWatch-Hazards", data=data, env=env)          # workstream 3 (Kurt)
