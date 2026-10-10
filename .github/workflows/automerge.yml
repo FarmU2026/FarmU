@@ -1,0 +1,48 @@
+name: automerge
+
+# Merges open PRs into main once their checks pass AND they still pass on top of the latest main.
+# Skips drafts, PRs labeled `hold` or `needs-human`, and PRs touching contracts/interfaces/workflows/IAM.
+# Logic: .github/scripts/automerge.py
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+  checks: read
+
+concurrency:
+  group: automerge
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            agent/requirements*.txt
+            infra/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: python -m pip install -r agent/requirements-dev.txt -r infra/requirements.txt
+      - run: |
+          git config user.name "fieldwatch-automerge"
+          git config user.email "automerge@users.noreply.github.com"
+      - run: python .github/scripts/automerge.py
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
