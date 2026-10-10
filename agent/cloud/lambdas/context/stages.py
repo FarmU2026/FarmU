@@ -48,23 +48,19 @@ def _soil(event):
 
 
 def _terrain(event):
-    res = adapters.get_field_context(event["field_id"])
-    if res.value.terrain is None:
+    res = adapters.get_terrain_summary(event["field_id"])
+    if res.value is None:
         raise StageError("no terrain data for this field")
-    return {"terrain": _dump(res.value.terrain)}, res.stub
+    return {"terrain": _dump(res.value)}, res.stub
 
 
 def _crop(event):
-    res = adapters.get_field_context(event["field_id"])
-    fc = res.value
-    if not fc.crop_history and not fc.cohort_field_ids:
+    res = adapters.get_crop_context(event["field_id"])
+    values = res.value
+    if not values.get("crop_history") and not values.get("cohort_field_ids"):
         raise StageError("no crop history or neighbors for this field")
-    return {
-        "crop_history": fc.crop_history,
-        "cohort_field_ids": fc.cohort_field_ids,
-        "county_fips": event.get("boundary", {}).get("county_fips") or fc.county_fips,
-        "stage": fc.stage,
-    }, res.stub
+    values["county_fips"] = event.get("boundary", {}).get("county_fips") or values.get("county_fips")
+    return {key: values.get(key) for key in ("crop_history", "cohort_field_ids", "county_fips", "stage")}, res.stub
 
 
 def _disease(event):
@@ -78,15 +74,11 @@ def _disease(event):
 
 
 def _economics(event):
-    res = adapters.get_field_context(event["field_id"])
-    fc = res.value
-    if fc.expected_yield_bu_ac is None and fc.price_usd_bu is None:
+    res = adapters.get_economics(event["field_id"])
+    values = res.value
+    if values.get("expected_yield_bu_ac") is None and values.get("price_usd_bu") is None:
         raise StageError("no yield or price for this field")
-    return {
-        "expected_yield_bu_ac": fc.expected_yield_bu_ac,
-        "price_usd_bu": fc.price_usd_bu,
-        "price_as_of": fc.price_as_of,
-    }, res.stub
+    return {key: values.get(key) for key in ("expected_yield_bu_ac", "price_usd_bu", "price_as_of")}, res.stub
 
 
 def _baseline(event):

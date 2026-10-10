@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import actions as A
 from . import contracts as C
+from . import context as CT
 from . import tools as T
 from .config import FIXTURES
 
@@ -116,8 +117,8 @@ TOOLS: list[ToolSpec] = [
              FieldIdIn, T.look_at_field, workstream=1, notes="Becomes a view over analyze_field's overlays."),
     ToolSpec("get_weather", "Last 30 days of weather at a field (Open-Meteo).", "read",
              FieldIdIn, T.get_weather, output_model=None, workstream=3, notes="Type to C.WeatherSummary; take start/end for replay."),
-    ToolSpec("get_soil", "Soil survey for a field.", "read", FieldIdIn, T.get_soil, workstream=4,
-             notes="Fixture-only today; replace with Soil Data Access (C.SoilProfile)."),
+    ToolSpec("get_soil", "Soil survey for a field.", "read", FieldIdIn, CT.get_soil_profile, output_model=C.SoilProfile, workstream=4,
+             notes="Live NRCS Soil Data Access; same contract as get_soil_profile."),
     ToolSpec("estimate_loss", "Crude dollar impact (yield x price x fraction).", "read", LossIn, T.estimate_loss,
              workstream=5, notes="Superseded by estimate_impact."),
     # --- planned: stubs return contract samples until the workstream lands ---
@@ -130,11 +131,11 @@ TOOLS: list[ToolSpec] = [
     ToolSpec("get_drought", "US Drought Monitor category for a county as of a date.", "read",
              DroughtIn, _sample("drought_status", C.DroughtStatus), output_model=C.DroughtStatus, workstream=3, stub=True),
     ToolSpec("get_soil_profile", "Soil map units for a field from NRCS Soil Data Access.", "read",
-             FieldIdIn, _sample("soil_profile", C.SoilProfile), output_model=C.SoilProfile, workstream=4, stub=True),
+             FieldIdIn, CT.get_soil_profile, output_model=C.SoilProfile, workstream=4),
     ToolSpec("get_field_context", "Everything static about a field: soil, terrain, crop history, neighbors, economics.",
-             "read", FieldIdIn, _sample("field_context", C.FieldContext), output_model=C.FieldContext, workstream=4, stub=True),
+             "read", FieldIdIn, CT.get_field_context, output_model=C.FieldContext, workstream=4),
     ToolSpec("get_disease_reports", "County disease confirmations for the season (EDDMapS).", "read",
-             DiseaseIn, _sample("disease_report", C.DiseaseReport), output_model=C.DiseaseReport, workstream=4, stub=True),
+             DiseaseIn, CT.get_disease_reports, output_model=C.DiseaseReport, workstream=4),
     ToolSpec("score_hypotheses", "Deterministic hypothesis probabilities from evidence items and the condition catalog.",
              "read", C.ScoreRequest, _sample("score_result", C.ScoreResult), output_model=C.ScoreResult, workstream=5, stub=True),
     ToolSpec("estimate_impact", "Dollar range for a condition on the affected acres, from published loss tables.", "read",

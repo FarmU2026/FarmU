@@ -48,4 +48,3 @@ No credentials are created or deployments performed.
 Validation: offline source and workflow tests; no AWS calls. USDA source URL was
 verified with HTTP HEAD (200); a small SDA live check timed out. DEM/CSB live
 geospatial reads and NASS authenticated queries still need deployment validation.
-
