@@ -1,0 +1,2183 @@
+{
+ "version": "2026-10-10.2",
+ "status": "DRAFT: priors, weights and loss fractions are hand-set approximations of published extension guidance, not transcribed tables. Pending agronomy review by Caleb. Citations name the publication family to verify.",
+ "sources": {
+  "isu_hail": "Iowa State Univ. Extension, corn and soybean hail damage guides (yield loss by stage and defoliation)",
+  "purdue_water": "Purdue Univ. Extension (R.L. Nielsen), corn water stress around silking and grain fill",
+  "unl_irrig": "Univ. of Nebraska-Lincoln Extension, center pivot irrigation scheduling and failure effects",
+  "umn_n": "Univ. of Minnesota / Iowa State Extension, corn nitrogen deficiency symptoms and loss",
+  "cropprotection": "Crop Protection Network (corn, soybean disease guides: tar spot, gray leaf spot, SDS)",
+  "ipmpipe": "Corn ipmPIPE / EDDMapS county disease reports",
+  "ksu_drift": "K-State / Univ. of Missouri Extension, herbicide drift symptoms and soybean/corn injury",
+  "isu_stand": "Iowa State Univ. Extension, corn and soybean planter skips, stand and yield",
+  "isu_flood": "Iowa State / Purdue Extension, flooding and ponding effects on corn and soybean",
+  "nrcs_soil": "USDA NRCS Soil Data Access / Web Soil Survey (sandy texture, available water capacity)",
+  "usdm": "US Drought Monitor (drought.gov category definitions)",
+  "noaa_mrms": "NOAA MRMS MESH radar hail estimate; SPC storm reports",
+  "rma": "USDA RMA Loss Adjustment Standards Handbook / Crop Insurance Handbook",
+  "nass": "USDA NASS Crop Production and Quick Stats (state yield trend)",
+  "ams": "USDA AMS / CME futures (planning price)",
+  "analyzer": "FieldWatch analyzer pattern features (docs/data-pipelines.md M3); weight set by hand",
+  "farmer": "Farmer's own report (farmer_reply); weight set by hand",
+  "photo": "Photo diagnosis by the imagery specialist; weight set by hand",
+  "judgment": "Agronomic judgment, to be reviewed"
+ },
+ "loss_fraction_meaning": "Fraction of expected yield lost on the affected acres. For duration-sensitive conditions the figures are for reference_days of the problem.",
+ "reference_days": 7,
+ "days_scaling": {
+  "min": 0.25,
+  "max": 1.5,
+  "conditions": [
+   "pivot_failure",
+   "drought",
+   "sandy_soil_water_stress",
+   "ponding"
+  ]
+ },
+ "crop_defaults": {
+  "corn": {
+   "yield_per_acre": 205,
+   "price_usd": 4.2,
+   "unit": "bu",
+   "source": "nass",
+   "note": "national trend yield; planning price near CME Dec corn. Yield from nass, price from ams. Override with FieldContext values."
+  },
+  "soybeans": {
+   "yield_per_acre": 62,
+   "price_usd": 10.5,
+   "unit": "bu",
+   "source": "nass",
+   "note": "state trend yield; planning price near CME Nov soybeans. Yield from nass, price from ams. Override with FieldContext values."
+  },
+  "wheat": {
+   "yield_per_acre": 55,
+   "price_usd": 5.8,
+   "unit": "bu",
+   "source": "nass",
+   "note": "state trend yield; planning price near CME wheat. Yield from nass, price from ams. Override with FieldContext values."
+  },
+  "milo": {
+   "yield_per_acre": 110,
+   "price_usd": 4.0,
+   "unit": "bu",
+   "source": "nass",
+   "note": "state trend yield; planning price near KC milo. Yield from nass, price from ams. Override with FieldContext values."
+  },
+  "alfalfa": {
+   "yield_per_acre": 5,
+   "price_usd": 180.0,
+   "unit": "ton",
+   "source": "nass",
+   "note": "dry hay tons/ac and $/ton. Yield from nass, price from ams. Override with FieldContext values."
+  },
+  "other": {
+   "yield_per_acre": 100,
+   "price_usd": 5.0,
+   "unit": "unit",
+   "source": "nass",
+   "note": "generic placeholder. Yield from nass, price from ams. Override with FieldContext values."
+  }
+ },
+ "rows": [
+  {
+   "condition": "hail",
+   "crop": "corn",
+   "stage_group": "early",
+   "loss": {
+    "low": [
+     0.01,
+     0.05
+    ],
+    "medium": [
+     0.03,
+     0.1
+    ],
+    "high": [
+     0.08,
+     0.2
+    ]
+   },
+   "source": "isu_hail",
+   "note": "Loss by stage from defoliation tables; growing point is below ground until about V6."
+  },
+  {
+   "condition": "hail",
+   "crop": "corn",
+   "stage_group": "vegetative",
+   "loss": {
+    "low": [
+     0.03,
+     0.1
+    ],
+    "medium": [
+     0.1,
+     0.25
+    ],
+    "high": [
+     0.25,
+     0.5
+    ]
+   },
+   "source": "isu_hail",
+   "note": "Loss by stage from defoliation tables; growing point is below ground until about V6."
+  },
+  {
+   "condition": "hail",
+   "crop": "corn",
+   "stage_group": "flowering",
+   "loss": {
+    "low": [
+     0.1,
+     0.25
+    ],
+    "medium": [
+     0.25,
+     0.55
+    ],
+    "high": [
+     0.55,
+     0.9
+    ]
+   },
+   "source": "isu_hail",
+   "note": "Loss by stage from defoliation tables; growing point is below ground until about V6."
+  },
+  {
+   "condition": "hail",
+   "crop": "corn",
+   "stage_group": "grain_fill",
+   "loss": {
+    "low": [
+     0.05,
+     0.15
+    ],
+    "medium": [
+     0.15,
+     0.35
+    ],
+    "high": [
+     0.35,
+     0.6
+    ]
+   },
+   "source": "isu_hail",
+   "note": "Loss by stage from defoliation tables; growing point is below ground until about V6."
+  },
+  {
+   "condition": "hail",
+   "crop": "corn",
+   "stage_group": "maturity",
+   "loss": {
+    "low": [
+     0.02,
+     0.06
+    ],
+    "medium": [
+     0.06,
+     0.15
+    ],
+    "high": [
+     0.15,
+     0.3
+    ]
+   },
+   "source": "isu_hail",
+   "note": "Loss by stage from defoliation tables; growing point is below ground until about V6."
+  },
+  {
+   "condition": "hail",
+   "crop": "soybeans",
+   "stage_group": "early",
+   "loss": {
+    "low": [
+     0.02,
+     0.08
+    ],
+    "medium": [
+     0.08,
+     0.2
+    ],
+    "high": [
+     0.2,
+     0.45
+    ]
+   },
+   "source": "isu_hail",
+   "note": "Soybean hail loss peaks R4-R6 (pod set and fill); stand loss matters early."
+  },
+  {
+   "condition": "hail",
+   "crop": "soybeans",
+   "stage_group": "vegetative",
+   "loss": {
+    "low": [
+     0.02,
+     0.08
+    ],
+    "medium": [
+     0.08,
+     0.18
+    ],
+    "high": [
+     0.18,
+     0.35
+    ]
+   },
+   "source": "isu_hail",
+   "note": "Soybean hail loss peaks R4-R6 (pod set and fill); stand loss matters early."
+  },
+  {
+   "condition": "hail",
+   "crop": "soybeans",
+   "stage_group": "flowering",
+   "loss": {
+    "low": [
+     0.05,
+     0.15
+    ],
+    "medium": [
+     0.15,
+     0.35
+    ],
+    "high": [
+     0.35,
+     0.6
+    ]
+   },
+   "source": "isu_hail",
+   "note": "Soybean hail loss peaks R4-R6 (pod set and fill); stand loss matters early."
+  },
+  {
+   "condition": "hail",
+   "crop": "soybeans",
+   "stage_group": "grain_fill",
+   "loss": {
+    "low": [
+     0.08,
+     0.2
+    ],
+    "medium": [
+     0.2,
+     0.45
+    ],
+    "high": [
+     0.45,
+     0.75
+    ]
+   },
+   "source": "isu_hail",
+   "note": "Soybean hail loss peaks R4-R6 (pod set and fill); stand loss matters early."
+  },
+  {
+   "condition": "hail",
+   "crop": "soybeans",
+   "stage_group": "maturity",
+   "loss": {
+    "low": [
+     0.02,
+     0.08
+    ],
+    "medium": [
+     0.08,
+     0.2
+    ],
+    "high": [
+     0.2,
+     0.4
+    ]
+   },
+   "source": "isu_hail",
+   "note": "Soybean hail loss peaks R4-R6 (pod set and fill); stand loss matters early."
+  },
+  {
+   "condition": "pivot_failure",
+   "crop": "corn",
+   "stage_group": "early",
+   "loss": {
+    "low": [
+     0,
+     0.03
+    ],
+    "medium": [
+     0.02,
+     0.06
+    ],
+    "high": [
+     0.05,
+     0.12
+    ]
+   },
+   "source": "purdue_water",
+   "note": "Per reference week without water; days_until_fixed scales it. Silking is most sensitive (Purdue: roughly 3-8% yield per day of severe stress)."
+  },
+  {
+   "condition": "pivot_failure",
+   "crop": "corn",
+   "stage_group": "vegetative",
+   "loss": {
+    "low": [
+     0.02,
+     0.07
+    ],
+    "medium": [
+     0.06,
+     0.15
+    ],
+    "high": [
+     0.12,
+     0.25
+    ]
+   },
+   "source": "purdue_water",
+   "note": "Per reference week without water; days_until_fixed scales it. Silking is most sensitive (Purdue: roughly 3-8% yield per day of severe stress)."
+  },
+  {
+   "condition": "pivot_failure",
+   "crop": "corn",
+   "stage_group": "flowering",
+   "loss": {
+    "low": [
+     0.1,
+     0.25
+    ],
+    "medium": [
+     0.25,
+     0.4
+    ],
+    "high": [
+     0.35,
+     0.55
+    ]
+   },
+   "source": "purdue_water",
+   "note": "Per reference week without water; days_until_fixed scales it. Silking is most sensitive (Purdue: roughly 3-8% yield per day of severe stress)."
+  },
+  {
+   "condition": "pivot_failure",
+   "crop": "corn",
+   "stage_group": "grain_fill",
+   "loss": {
+    "low": [
+     0.05,
+     0.12
+    ],
+    "medium": [
+     0.12,
+     0.25
+    ],
+    "high": [
+     0.2,
+     0.35
+    ]
+   },
+   "source": "purdue_water",
+   "note": "Per reference week without water; days_until_fixed scales it. Silking is most sensitive (Purdue: roughly 3-8% yield per day of severe stress)."
+  },
+  {
+   "condition": "pivot_failure",
+   "crop": "corn",
+   "stage_group": "maturity",
+   "loss": {
+    "low": [
+     0.01,
+     0.04
+    ],
+    "medium": [
+     0.03,
+     0.08
+    ],
+    "high": [
+     0.06,
+     0.12
+    ]
+   },
+   "source": "purdue_water",
+   "note": "Per reference week without water; days_until_fixed scales it. Silking is most sensitive (Purdue: roughly 3-8% yield per day of severe stress)."
+  },
+  {
+   "condition": "drought",
+   "crop": "corn",
+   "stage_group": "early",
+   "loss": {
+    "low": [
+     0.0,
+     0.024
+    ],
+    "medium": [
+     0.016,
+     0.048
+    ],
+    "high": [
+     0.04,
+     0.096
+    ]
+   },
+   "source": "purdue_water",
+   "note": "Pivot-failure rows scaled by 0.8 (field-wide stress is usually partial)."
+  },
+  {
+   "condition": "drought",
+   "crop": "corn",
+   "stage_group": "vegetative",
+   "loss": {
+    "low": [
+     0.016,
+     0.056
+    ],
+    "medium": [
+     0.048,
+     0.12
+    ],
+    "high": [
+     0.096,
+     0.2
+    ]
+   },
+   "source": "purdue_water",
+   "note": "Pivot-failure rows scaled by 0.8 (field-wide stress is usually partial)."
+  },
+  {
+   "condition": "drought",
+   "crop": "corn",
+   "stage_group": "flowering",
+   "loss": {
+    "low": [
+     0.08,
+     0.2
+    ],
+    "medium": [
+     0.2,
+     0.32
+    ],
+    "high": [
+     0.28,
+     0.44
+    ]
+   },
+   "source": "purdue_water",
+   "note": "Pivot-failure rows scaled by 0.8 (field-wide stress is usually partial)."
+  },
+  {
+   "condition": "drought",
+   "crop": "corn",
+   "stage_group": "grain_fill",
+   "loss": {
+    "low": [
+     0.04,
+     0.096
+    ],
+    "medium": [
+     0.096,
+     0.2
+    ],
+    "high": [
+     0.16,
+     0.28
+    ]
+   },
+   "source": "purdue_water",
+   "note": "Pivot-failure rows scaled by 0.8 (field-wide stress is usually partial)."
+  },
+  {
+   "condition": "drought",
+   "crop": "corn",
+   "stage_group": "maturity",
+   "loss": {
+    "low": [
+     0.008,
+     0.032
+    ],
+    "medium": [
+     0.024,
+     0.064
+    ],
+    "high": [
+     0.048,
+     0.096
+    ]
+   },
+   "source": "purdue_water",
+   "note": "Pivot-failure rows scaled by 0.8 (field-wide stress is usually partial)."
+  },
+  {
+   "condition": "sandy_soil_water_stress",
+   "crop": "corn",
+   "stage_group": "early",
+   "loss": {
+    "low": [
+     0.0,
+     0.021
+    ],
+    "medium": [
+     0.014,
+     0.042
+    ],
+    "high": [
+     0.035,
+     0.084
+    ]
+   },
+   "source": "nrcs_soil",
+   "note": "Pivot-failure rows scaled by 0.7 (sandy zones stress but rarely fully fail)."
+  },
+  {
+   "condition": "sandy_soil_water_stress",
+   "crop": "corn",
+   "stage_group": "vegetative",
+   "loss": {
+    "low": [
+     0.014,
+     0.049
+    ],
+    "medium": [
+     0.042,
+     0.105
+    ],
+    "high": [
+     0.084,
+     0.175
+    ]
+   },
+   "source": "nrcs_soil",
+   "note": "Pivot-failure rows scaled by 0.7 (sandy zones stress but rarely fully fail)."
+  },
+  {
+   "condition": "sandy_soil_water_stress",
+   "crop": "corn",
+   "stage_group": "flowering",
+   "loss": {
+    "low": [
+     0.07,
+     0.175
+    ],
+    "medium": [
+     0.175,
+     0.28
+    ],
+    "high": [
+     0.245,
+     0.385
+    ]
+   },
+   "source": "nrcs_soil",
+   "note": "Pivot-failure rows scaled by 0.7 (sandy zones stress but rarely fully fail)."
+  },
+  {
+   "condition": "sandy_soil_water_stress",
+   "crop": "corn",
+   "stage_group": "grain_fill",
+   "loss": {
+    "low": [
+     0.035,
+     0.084
+    ],
+    "medium": [
+     0.084,
+     0.175
+    ],
+    "high": [
+     0.14,
+     0.245
+    ]
+   },
+   "source": "nrcs_soil",
+   "note": "Pivot-failure rows scaled by 0.7 (sandy zones stress but rarely fully fail)."
+  },
+  {
+   "condition": "sandy_soil_water_stress",
+   "crop": "corn",
+   "stage_group": "maturity",
+   "loss": {
+    "low": [
+     0.007,
+     0.028
+    ],
+    "medium": [
+     0.021,
+     0.056
+    ],
+    "high": [
+     0.042,
+     0.084
+    ]
+   },
+   "source": "nrcs_soil",
+   "note": "Pivot-failure rows scaled by 0.7 (sandy zones stress but rarely fully fail)."
+  },
+  {
+   "condition": "pivot_failure",
+   "crop": "soybeans",
+   "stage_group": "early",
+   "loss": {
+    "low": [
+     0,
+     0.03
+    ],
+    "medium": [
+     0.02,
+     0.05
+    ],
+    "high": [
+     0.04,
+     0.1
+    ]
+   },
+   "source": "purdue_water",
+   "note": "Per reference week without water; days_until_fixed scales it. Silking is most sensitive (Purdue: roughly 3-8% yield per day of severe stress)."
+  },
+  {
+   "condition": "pivot_failure",
+   "crop": "soybeans",
+   "stage_group": "vegetative",
+   "loss": {
+    "low": [
+     0.02,
+     0.06
+    ],
+    "medium": [
+     0.05,
+     0.12
+    ],
+    "high": [
+     0.1,
+     0.2
+    ]
+   },
+   "source": "purdue_water",
+   "note": "Per reference week without water; days_until_fixed scales it. Silking is most sensitive (Purdue: roughly 3-8% yield per day of severe stress)."
+  },
+  {
+   "condition": "pivot_failure",
+   "crop": "soybeans",
+   "stage_group": "flowering",
+   "loss": {
+    "low": [
+     0.05,
+     0.12
+    ],
+    "medium": [
+     0.12,
+     0.25
+    ],
+    "high": [
+     0.22,
+     0.35
+    ]
+   },
+   "source": "purdue_water",
+   "note": "Per reference week without water; days_until_fixed scales it. Silking is most sensitive (Purdue: roughly 3-8% yield per day of severe stress)."
+  },
+  {
+   "condition": "pivot_failure",
+   "crop": "soybeans",
+   "stage_group": "grain_fill",
+   "loss": {
+    "low": [
+     0.08,
+     0.18
+    ],
+    "medium": [
+     0.18,
+     0.32
+    ],
+    "high": [
+     0.3,
+     0.45
+    ]
+   },
+   "source": "purdue_water",
+   "note": "Per reference week without water; days_until_fixed scales it. Silking is most sensitive (Purdue: roughly 3-8% yield per day of severe stress)."
+  },
+  {
+   "condition": "pivot_failure",
+   "crop": "soybeans",
+   "stage_group": "maturity",
+   "loss": {
+    "low": [
+     0.01,
+     0.05
+    ],
+    "medium": [
+     0.04,
+     0.1
+    ],
+    "high": [
+     0.08,
+     0.15
+    ]
+   },
+   "source": "purdue_water",
+   "note": "Per reference week without water; days_until_fixed scales it. Silking is most sensitive (Purdue: roughly 3-8% yield per day of severe stress)."
+  },
+  {
+   "condition": "drought",
+   "crop": "soybeans",
+   "stage_group": "early",
+   "loss": {
+    "low": [
+     0.0,
+     0.024
+    ],
+    "medium": [
+     0.016,
+     0.04
+    ],
+    "high": [
+     0.032,
+     0.08
+    ]
+   },
+   "source": "purdue_water",
+   "note": "Pivot-failure rows scaled by 0.8 (field-wide stress is usually partial)."
+  },
+  {
+   "condition": "drought",
+   "crop": "soybeans",
+   "stage_group": "vegetative",
+   "loss": {
+    "low": [
+     0.016,
+     0.048
+    ],
+    "medium": [
+     0.04,
+     0.096
+    ],
+    "high": [
+     0.08,
+     0.16
+    ]
+   },
+   "source": "purdue_water",
+   "note": "Pivot-failure rows scaled by 0.8 (field-wide stress is usually partial)."
+  },
+  {
+   "condition": "drought",
+   "crop": "soybeans",
+   "stage_group": "flowering",
+   "loss": {
+    "low": [
+     0.04,
+     0.096
+    ],
+    "medium": [
+     0.096,
+     0.2
+    ],
+    "high": [
+     0.176,
+     0.28
+    ]
+   },
+   "source": "purdue_water",
+   "note": "Pivot-failure rows scaled by 0.8 (field-wide stress is usually partial)."
+  },
+  {
+   "condition": "drought",
+   "crop": "soybeans",
+   "stage_group": "grain_fill",
+   "loss": {
+    "low": [
+     0.064,
+     0.144
+    ],
+    "medium": [
+     0.144,
+     0.256
+    ],
+    "high": [
+     0.24,
+     0.36
+    ]
+   },
+   "source": "purdue_water",
+   "note": "Pivot-failure rows scaled by 0.8 (field-wide stress is usually partial)."
+  },
+  {
+   "condition": "drought",
+   "crop": "soybeans",
+   "stage_group": "maturity",
+   "loss": {
+    "low": [
+     0.008,
+     0.04
+    ],
+    "medium": [
+     0.032,
+     0.08
+    ],
+    "high": [
+     0.064,
+     0.12
+    ]
+   },
+   "source": "purdue_water",
+   "note": "Pivot-failure rows scaled by 0.8 (field-wide stress is usually partial)."
+  },
+  {
+   "condition": "sandy_soil_water_stress",
+   "crop": "soybeans",
+   "stage_group": "early",
+   "loss": {
+    "low": [
+     0.0,
+     0.021
+    ],
+    "medium": [
+     0.014,
+     0.035
+    ],
+    "high": [
+     0.028,
+     0.07
+    ]
+   },
+   "source": "nrcs_soil",
+   "note": "Pivot-failure rows scaled by 0.7 (sandy zones stress but rarely fully fail)."
+  },
+  {
+   "condition": "sandy_soil_water_stress",
+   "crop": "soybeans",
+   "stage_group": "vegetative",
+   "loss": {
+    "low": [
+     0.014,
+     0.042
+    ],
+    "medium": [
+     0.035,
+     0.084
+    ],
+    "high": [
+     0.07,
+     0.14
+    ]
+   },
+   "source": "nrcs_soil",
+   "note": "Pivot-failure rows scaled by 0.7 (sandy zones stress but rarely fully fail)."
+  },
+  {
+   "condition": "sandy_soil_water_stress",
+   "crop": "soybeans",
+   "stage_group": "flowering",
+   "loss": {
+    "low": [
+     0.035,
+     0.084
+    ],
+    "medium": [
+     0.084,
+     0.175
+    ],
+    "high": [
+     0.154,
+     0.245
+    ]
+   },
+   "source": "nrcs_soil",
+   "note": "Pivot-failure rows scaled by 0.7 (sandy zones stress but rarely fully fail)."
+  },
+  {
+   "condition": "sandy_soil_water_stress",
+   "crop": "soybeans",
+   "stage_group": "grain_fill",
+   "loss": {
+    "low": [
+     0.056,
+     0.126
+    ],
+    "medium": [
+     0.126,
+     0.224
+    ],
+    "high": [
+     0.21,
+     0.315
+    ]
+   },
+   "source": "nrcs_soil",
+   "note": "Pivot-failure rows scaled by 0.7 (sandy zones stress but rarely fully fail)."
+  },
+  {
+   "condition": "sandy_soil_water_stress",
+   "crop": "soybeans",
+   "stage_group": "maturity",
+   "loss": {
+    "low": [
+     0.007,
+     0.035
+    ],
+    "medium": [
+     0.028,
+     0.07
+    ],
+    "high": [
+     0.056,
+     0.105
+    ]
+   },
+   "source": "nrcs_soil",
+   "note": "Pivot-failure rows scaled by 0.7 (sandy zones stress but rarely fully fail)."
+  },
+  {
+   "condition": "ponding",
+   "crop": "corn",
+   "stage_group": "early",
+   "loss": {
+    "low": [
+     0.05,
+     0.15
+    ],
+    "medium": [
+     0.15,
+     0.35
+    ],
+    "high": [
+     0.3,
+     0.6
+    ]
+   },
+   "source": "isu_flood",
+   "note": "Early-season flooding for more than 48-96 h kills plants; later, mostly partial."
+  },
+  {
+   "condition": "ponding",
+   "crop": "corn",
+   "stage_group": "vegetative",
+   "loss": {
+    "low": [
+     0.03,
+     0.1
+    ],
+    "medium": [
+     0.08,
+     0.2
+    ],
+    "high": [
+     0.15,
+     0.35
+    ]
+   },
+   "source": "isu_flood",
+   "note": "Early-season flooding for more than 48-96 h kills plants; later, mostly partial."
+  },
+  {
+   "condition": "ponding",
+   "crop": "corn",
+   "stage_group": "flowering",
+   "loss": {
+    "low": [
+     0.03,
+     0.08
+    ],
+    "medium": [
+     0.08,
+     0.18
+    ],
+    "high": [
+     0.15,
+     0.3
+    ]
+   },
+   "source": "isu_flood",
+   "note": "Early-season flooding for more than 48-96 h kills plants; later, mostly partial."
+  },
+  {
+   "condition": "ponding",
+   "crop": "corn",
+   "stage_group": "grain_fill",
+   "loss": {
+    "low": [
+     0.02,
+     0.06
+    ],
+    "medium": [
+     0.05,
+     0.12
+    ],
+    "high": [
+     0.1,
+     0.2
+    ]
+   },
+   "source": "isu_flood",
+   "note": "Early-season flooding for more than 48-96 h kills plants; later, mostly partial."
+  },
+  {
+   "condition": "ponding",
+   "crop": "corn",
+   "stage_group": "maturity",
+   "loss": {
+    "low": [
+     0,
+     0.03
+    ],
+    "medium": [
+     0.02,
+     0.06
+    ],
+    "high": [
+     0.04,
+     0.1
+    ]
+   },
+   "source": "isu_flood",
+   "note": "Early-season flooding for more than 48-96 h kills plants; later, mostly partial."
+  },
+  {
+   "condition": "ponding",
+   "crop": "soybeans",
+   "stage_group": "early",
+   "loss": {
+    "low": [
+     0.06,
+     0.18
+    ],
+    "medium": [
+     0.18,
+     0.42
+    ],
+    "high": [
+     0.36,
+     0.72
+    ]
+   },
+   "source": "isu_flood",
+   "note": "Soybeans are less flood tolerant than corn: corn rows scaled by 1.2."
+  },
+  {
+   "condition": "ponding",
+   "crop": "soybeans",
+   "stage_group": "vegetative",
+   "loss": {
+    "low": [
+     0.036,
+     0.12
+    ],
+    "medium": [
+     0.096,
+     0.24
+    ],
+    "high": [
+     0.18,
+     0.42
+    ]
+   },
+   "source": "isu_flood",
+   "note": "Soybeans are less flood tolerant than corn: corn rows scaled by 1.2."
+  },
+  {
+   "condition": "ponding",
+   "crop": "soybeans",
+   "stage_group": "flowering",
+   "loss": {
+    "low": [
+     0.036,
+     0.096
+    ],
+    "medium": [
+     0.096,
+     0.216
+    ],
+    "high": [
+     0.18,
+     0.36
+    ]
+   },
+   "source": "isu_flood",
+   "note": "Soybeans are less flood tolerant than corn: corn rows scaled by 1.2."
+  },
+  {
+   "condition": "ponding",
+   "crop": "soybeans",
+   "stage_group": "grain_fill",
+   "loss": {
+    "low": [
+     0.024,
+     0.072
+    ],
+    "medium": [
+     0.06,
+     0.144
+    ],
+    "high": [
+     0.12,
+     0.24
+    ]
+   },
+   "source": "isu_flood",
+   "note": "Soybeans are less flood tolerant than corn: corn rows scaled by 1.2."
+  },
+  {
+   "condition": "ponding",
+   "crop": "soybeans",
+   "stage_group": "maturity",
+   "loss": {
+    "low": [
+     0.0,
+     0.036
+    ],
+    "medium": [
+     0.024,
+     0.072
+    ],
+    "high": [
+     0.048,
+     0.12
+    ]
+   },
+   "source": "isu_flood",
+   "note": "Soybeans are less flood tolerant than corn: corn rows scaled by 1.2."
+  },
+  {
+   "condition": "nitrogen",
+   "crop": "corn",
+   "stage_group": "early",
+   "loss": {
+    "low": [
+     0,
+     0.03
+    ],
+    "medium": [
+     0.02,
+     0.06
+    ],
+    "high": [
+     0.05,
+     0.1
+    ]
+   },
+   "source": "umn_n",
+   "note": "Deficiency matters most V8 through grain fill."
+  },
+  {
+   "condition": "nitrogen",
+   "crop": "corn",
+   "stage_group": "vegetative",
+   "loss": {
+    "low": [
+     0.03,
+     0.08
+    ],
+    "medium": [
+     0.08,
+     0.18
+    ],
+    "high": [
+     0.15,
+     0.3
+    ]
+   },
+   "source": "umn_n",
+   "note": "Deficiency matters most V8 through grain fill."
+  },
+  {
+   "condition": "nitrogen",
+   "crop": "corn",
+   "stage_group": "flowering",
+   "loss": {
+    "low": [
+     0.05,
+     0.12
+    ],
+    "medium": [
+     0.12,
+     0.25
+    ],
+    "high": [
+     0.22,
+     0.4
+    ]
+   },
+   "source": "umn_n",
+   "note": "Deficiency matters most V8 through grain fill."
+  },
+  {
+   "condition": "nitrogen",
+   "crop": "corn",
+   "stage_group": "grain_fill",
+   "loss": {
+    "low": [
+     0.03,
+     0.08
+    ],
+    "medium": [
+     0.08,
+     0.15
+    ],
+    "high": [
+     0.12,
+     0.25
+    ]
+   },
+   "source": "umn_n",
+   "note": "Deficiency matters most V8 through grain fill."
+  },
+  {
+   "condition": "nitrogen",
+   "crop": "corn",
+   "stage_group": "maturity",
+   "loss": {
+    "low": [
+     0,
+     0.02
+    ],
+    "medium": [
+     0.01,
+     0.04
+    ],
+    "high": [
+     0.03,
+     0.06
+    ]
+   },
+   "source": "umn_n",
+   "note": "Deficiency matters most V8 through grain fill."
+  },
+  {
+   "condition": "nitrogen",
+   "crop": "soybeans",
+   "stage_group": "early",
+   "loss": {
+    "low": [
+     0.0,
+     0.006
+    ],
+    "medium": [
+     0.004,
+     0.012
+    ],
+    "high": [
+     0.01,
+     0.02
+    ]
+   },
+   "source": "umn_n",
+   "note": "Soybean fixes nitrogen; corn rows scaled by 0.2."
+  },
+  {
+   "condition": "nitrogen",
+   "crop": "soybeans",
+   "stage_group": "vegetative",
+   "loss": {
+    "low": [
+     0.006,
+     0.016
+    ],
+    "medium": [
+     0.016,
+     0.036
+    ],
+    "high": [
+     0.03,
+     0.06
+    ]
+   },
+   "source": "umn_n",
+   "note": "Soybean fixes nitrogen; corn rows scaled by 0.2."
+  },
+  {
+   "condition": "nitrogen",
+   "crop": "soybeans",
+   "stage_group": "flowering",
+   "loss": {
+    "low": [
+     0.01,
+     0.024
+    ],
+    "medium": [
+     0.024,
+     0.05
+    ],
+    "high": [
+     0.044,
+     0.08
+    ]
+   },
+   "source": "umn_n",
+   "note": "Soybean fixes nitrogen; corn rows scaled by 0.2."
+  },
+  {
+   "condition": "nitrogen",
+   "crop": "soybeans",
+   "stage_group": "grain_fill",
+   "loss": {
+    "low": [
+     0.006,
+     0.016
+    ],
+    "medium": [
+     0.016,
+     0.03
+    ],
+    "high": [
+     0.024,
+     0.05
+    ]
+   },
+   "source": "umn_n",
+   "note": "Soybean fixes nitrogen; corn rows scaled by 0.2."
+  },
+  {
+   "condition": "nitrogen",
+   "crop": "soybeans",
+   "stage_group": "maturity",
+   "loss": {
+    "low": [
+     0.0,
+     0.004
+    ],
+    "medium": [
+     0.002,
+     0.008
+    ],
+    "high": [
+     0.006,
+     0.012
+    ]
+   },
+   "source": "umn_n",
+   "note": "Soybean fixes nitrogen; corn rows scaled by 0.2."
+  },
+  {
+   "condition": "herbicide_drift",
+   "crop": "corn",
+   "stage_group": "early",
+   "loss": {
+    "low": [
+     0,
+     0.02
+    ],
+    "medium": [
+     0.02,
+     0.06
+    ],
+    "high": [
+     0.05,
+     0.15
+    ]
+   },
+   "source": "ksu_drift",
+   "note": "Corn tolerates most drift; sublethal injury early recovers."
+  },
+  {
+   "condition": "herbicide_drift",
+   "crop": "corn",
+   "stage_group": "vegetative",
+   "loss": {
+    "low": [
+     0,
+     0.03
+    ],
+    "medium": [
+     0.03,
+     0.1
+    ],
+    "high": [
+     0.1,
+     0.25
+    ]
+   },
+   "source": "ksu_drift",
+   "note": "Corn tolerates most drift; sublethal injury early recovers."
+  },
+  {
+   "condition": "herbicide_drift",
+   "crop": "corn",
+   "stage_group": "flowering",
+   "loss": {
+    "low": [
+     0.01,
+     0.05
+    ],
+    "medium": [
+     0.05,
+     0.15
+    ],
+    "high": [
+     0.12,
+     0.3
+    ]
+   },
+   "source": "ksu_drift",
+   "note": "Corn tolerates most drift; sublethal injury early recovers."
+  },
+  {
+   "condition": "herbicide_drift",
+   "crop": "corn",
+   "stage_group": "grain_fill",
+   "loss": {
+    "low": [
+     0.01,
+     0.05
+    ],
+    "medium": [
+     0.04,
+     0.12
+    ],
+    "high": [
+     0.1,
+     0.25
+    ]
+   },
+   "source": "ksu_drift",
+   "note": "Corn tolerates most drift; sublethal injury early recovers."
+  },
+  {
+   "condition": "herbicide_drift",
+   "crop": "corn",
+   "stage_group": "maturity",
+   "loss": {
+    "low": [
+     0,
+     0.02
+    ],
+    "medium": [
+     0.01,
+     0.04
+    ],
+    "high": [
+     0.03,
+     0.08
+    ]
+   },
+   "source": "ksu_drift",
+   "note": "Corn tolerates most drift; sublethal injury early recovers."
+  },
+  {
+   "condition": "herbicide_drift",
+   "crop": "soybeans",
+   "stage_group": "early",
+   "loss": {
+    "low": [
+     0.02,
+     0.08
+    ],
+    "medium": [
+     0.08,
+     0.25
+    ],
+    "high": [
+     0.25,
+     0.5
+    ]
+   },
+   "source": "ksu_drift",
+   "note": "Soybeans are sensitive to dicamba/2,4-D drift, worst at flowering and pod set."
+  },
+  {
+   "condition": "herbicide_drift",
+   "crop": "soybeans",
+   "stage_group": "vegetative",
+   "loss": {
+    "low": [
+     0.03,
+     0.1
+    ],
+    "medium": [
+     0.1,
+     0.28
+    ],
+    "high": [
+     0.25,
+     0.5
+    ]
+   },
+   "source": "ksu_drift",
+   "note": "Soybeans are sensitive to dicamba/2,4-D drift, worst at flowering and pod set."
+  },
+  {
+   "condition": "herbicide_drift",
+   "crop": "soybeans",
+   "stage_group": "flowering",
+   "loss": {
+    "low": [
+     0.05,
+     0.15
+    ],
+    "medium": [
+     0.15,
+     0.35
+    ],
+    "high": [
+     0.3,
+     0.6
+    ]
+   },
+   "source": "ksu_drift",
+   "note": "Soybeans are sensitive to dicamba/2,4-D drift, worst at flowering and pod set."
+  },
+  {
+   "condition": "herbicide_drift",
+   "crop": "soybeans",
+   "stage_group": "grain_fill",
+   "loss": {
+    "low": [
+     0.05,
+     0.15
+    ],
+    "medium": [
+     0.15,
+     0.3
+    ],
+    "high": [
+     0.25,
+     0.5
+    ]
+   },
+   "source": "ksu_drift",
+   "note": "Soybeans are sensitive to dicamba/2,4-D drift, worst at flowering and pod set."
+  },
+  {
+   "condition": "herbicide_drift",
+   "crop": "soybeans",
+   "stage_group": "maturity",
+   "loss": {
+    "low": [
+     0,
+     0.03
+    ],
+    "medium": [
+     0.02,
+     0.08
+    ],
+    "high": [
+     0.06,
+     0.15
+    ]
+   },
+   "source": "ksu_drift",
+   "note": "Soybeans are sensitive to dicamba/2,4-D drift, worst at flowering and pod set."
+  },
+  {
+   "condition": "planter_skip",
+   "crop": "corn",
+   "stage_group": "early",
+   "loss": {
+    "low": [
+     0.05,
+     0.1
+    ],
+    "medium": [
+     0.1,
+     0.25
+    ],
+    "high": [
+     0.25,
+     0.5
+    ]
+   },
+   "source": "isu_stand",
+   "note": "Skips and doubles on the affected strip; stage-independent."
+  },
+  {
+   "condition": "planter_skip",
+   "crop": "corn",
+   "stage_group": "vegetative",
+   "loss": {
+    "low": [
+     0.05,
+     0.1
+    ],
+    "medium": [
+     0.1,
+     0.25
+    ],
+    "high": [
+     0.25,
+     0.5
+    ]
+   },
+   "source": "isu_stand",
+   "note": "Skips and doubles on the affected strip; stage-independent."
+  },
+  {
+   "condition": "planter_skip",
+   "crop": "corn",
+   "stage_group": "flowering",
+   "loss": {
+    "low": [
+     0.05,
+     0.1
+    ],
+    "medium": [
+     0.1,
+     0.25
+    ],
+    "high": [
+     0.25,
+     0.5
+    ]
+   },
+   "source": "isu_stand",
+   "note": "Skips and doubles on the affected strip; stage-independent."
+  },
+  {
+   "condition": "planter_skip",
+   "crop": "corn",
+   "stage_group": "grain_fill",
+   "loss": {
+    "low": [
+     0.05,
+     0.1
+    ],
+    "medium": [
+     0.1,
+     0.25
+    ],
+    "high": [
+     0.25,
+     0.5
+    ]
+   },
+   "source": "isu_stand",
+   "note": "Skips and doubles on the affected strip; stage-independent."
+  },
+  {
+   "condition": "planter_skip",
+   "crop": "corn",
+   "stage_group": "maturity",
+   "loss": {
+    "low": [
+     0.05,
+     0.1
+    ],
+    "medium": [
+     0.1,
+     0.25
+    ],
+    "high": [
+     0.25,
+     0.5
+    ]
+   },
+   "source": "isu_stand",
+   "note": "Skips and doubles on the affected strip; stage-independent."
+  },
+  {
+   "condition": "planter_skip",
+   "crop": "soybeans",
+   "stage_group": "early",
+   "loss": {
+    "low": [
+     0.03,
+     0.06
+    ],
+    "medium": [
+     0.06,
+     0.15
+    ],
+    "high": [
+     0.15,
+     0.3
+    ]
+   },
+   "source": "isu_stand",
+   "note": "Soybeans compensate for gaps better: corn rows scaled by 0.6."
+  },
+  {
+   "condition": "planter_skip",
+   "crop": "soybeans",
+   "stage_group": "vegetative",
+   "loss": {
+    "low": [
+     0.03,
+     0.06
+    ],
+    "medium": [
+     0.06,
+     0.15
+    ],
+    "high": [
+     0.15,
+     0.3
+    ]
+   },
+   "source": "isu_stand",
+   "note": "Soybeans compensate for gaps better: corn rows scaled by 0.6."
+  },
+  {
+   "condition": "planter_skip",
+   "crop": "soybeans",
+   "stage_group": "flowering",
+   "loss": {
+    "low": [
+     0.03,
+     0.06
+    ],
+    "medium": [
+     0.06,
+     0.15
+    ],
+    "high": [
+     0.15,
+     0.3
+    ]
+   },
+   "source": "isu_stand",
+   "note": "Soybeans compensate for gaps better: corn rows scaled by 0.6."
+  },
+  {
+   "condition": "planter_skip",
+   "crop": "soybeans",
+   "stage_group": "grain_fill",
+   "loss": {
+    "low": [
+     0.03,
+     0.06
+    ],
+    "medium": [
+     0.06,
+     0.15
+    ],
+    "high": [
+     0.15,
+     0.3
+    ]
+   },
+   "source": "isu_stand",
+   "note": "Soybeans compensate for gaps better: corn rows scaled by 0.6."
+  },
+  {
+   "condition": "planter_skip",
+   "crop": "soybeans",
+   "stage_group": "maturity",
+   "loss": {
+    "low": [
+     0.03,
+     0.06
+    ],
+    "medium": [
+     0.06,
+     0.15
+    ],
+    "high": [
+     0.15,
+     0.3
+    ]
+   },
+   "source": "isu_stand",
+   "note": "Soybeans compensate for gaps better: corn rows scaled by 0.6."
+  },
+  {
+   "condition": "disease_pest",
+   "crop": "corn",
+   "stage_group": "early",
+   "loss": {
+    "low": [
+     0,
+     0.01
+    ],
+    "medium": [
+     0,
+     0.02
+    ],
+    "high": [
+     0.01,
+     0.04
+    ]
+   },
+   "source": "cropprotection",
+   "note": "Tar spot and gray leaf spot matter from VT through grain fill; severe tar spot can approach 30%+."
+  },
+  {
+   "condition": "disease_pest",
+   "crop": "corn",
+   "stage_group": "vegetative",
+   "loss": {
+    "low": [
+     0,
+     0.02
+    ],
+    "medium": [
+     0.01,
+     0.04
+    ],
+    "high": [
+     0.02,
+     0.08
+    ]
+   },
+   "source": "cropprotection",
+   "note": "Tar spot and gray leaf spot matter from VT through grain fill; severe tar spot can approach 30%+."
+  },
+  {
+   "condition": "disease_pest",
+   "crop": "corn",
+   "stage_group": "flowering",
+   "loss": {
+    "low": [
+     0.02,
+     0.08
+    ],
+    "medium": [
+     0.05,
+     0.15
+    ],
+    "high": [
+     0.1,
+     0.3
+    ]
+   },
+   "source": "cropprotection",
+   "note": "Tar spot and gray leaf spot matter from VT through grain fill; severe tar spot can approach 30%+."
+  },
+  {
+   "condition": "disease_pest",
+   "crop": "corn",
+   "stage_group": "grain_fill",
+   "loss": {
+    "low": [
+     0.03,
+     0.1
+    ],
+    "medium": [
+     0.08,
+     0.2
+    ],
+    "high": [
+     0.15,
+     0.4
+    ]
+   },
+   "source": "cropprotection",
+   "note": "Tar spot and gray leaf spot matter from VT through grain fill; severe tar spot can approach 30%+."
+  },
+  {
+   "condition": "disease_pest",
+   "crop": "corn",
+   "stage_group": "maturity",
+   "loss": {
+    "low": [
+     0,
+     0.04
+    ],
+    "medium": [
+     0.02,
+     0.08
+    ],
+    "high": [
+     0.05,
+     0.15
+    ]
+   },
+   "source": "cropprotection",
+   "note": "Tar spot and gray leaf spot matter from VT through grain fill; severe tar spot can approach 30%+."
+  },
+  {
+   "condition": "disease_pest",
+   "crop": "soybeans",
+   "stage_group": "early",
+   "loss": {
+    "low": [
+     0,
+     0.01
+    ],
+    "medium": [
+     0,
+     0.02
+    ],
+    "high": [
+     0.01,
+     0.04
+    ]
+   },
+   "source": "cropprotection",
+   "note": "Soybean SDS and foliar disease matter R1 through R5."
+  },
+  {
+   "condition": "disease_pest",
+   "crop": "soybeans",
+   "stage_group": "vegetative",
+   "loss": {
+    "low": [
+     0,
+     0.02
+    ],
+    "medium": [
+     0.01,
+     0.04
+    ],
+    "high": [
+     0.02,
+     0.08
+    ]
+   },
+   "source": "cropprotection",
+   "note": "Soybean SDS and foliar disease matter R1 through R5."
+  },
+  {
+   "condition": "disease_pest",
+   "crop": "soybeans",
+   "stage_group": "flowering",
+   "loss": {
+    "low": [
+     0.03,
+     0.1
+    ],
+    "medium": [
+     0.1,
+     0.25
+    ],
+    "high": [
+     0.2,
+     0.5
+    ]
+   },
+   "source": "cropprotection",
+   "note": "Soybean SDS and foliar disease matter R1 through R5."
+  },
+  {
+   "condition": "disease_pest",
+   "crop": "soybeans",
+   "stage_group": "grain_fill",
+   "loss": {
+    "low": [
+     0.05,
+     0.15
+    ],
+    "medium": [
+     0.15,
+     0.35
+    ],
+    "high": [
+     0.3,
+     0.6
+    ]
+   },
+   "source": "cropprotection",
+   "note": "Soybean SDS and foliar disease matter R1 through R5."
+  },
+  {
+   "condition": "disease_pest",
+   "crop": "soybeans",
+   "stage_group": "maturity",
+   "loss": {
+    "low": [
+     0,
+     0.04
+    ],
+    "medium": [
+     0.02,
+     0.08
+    ],
+    "high": [
+     0.05,
+     0.15
+    ]
+   },
+   "source": "cropprotection",
+   "note": "Soybean SDS and foliar disease matter R1 through R5."
+  },
+  {
+   "condition": "pivot_failure",
+   "crop": "any",
+   "stage_group": "any",
+   "loss": {
+    "low": [
+     0,
+     0.25
+    ],
+    "medium": [
+     0.02,
+     0.4
+    ],
+    "high": [
+     0.04,
+     0.55
+    ]
+   },
+   "source": "judgment",
+   "note": "Envelope of the corn and soybean rows across stages; used for wheat, milo, alfalfa, other and unknown stages."
+  },
+  {
+   "condition": "hail",
+   "crop": "any",
+   "stage_group": "any",
+   "loss": {
+    "low": [
+     0.01,
+     0.25
+    ],
+    "medium": [
+     0.03,
+     0.55
+    ],
+    "high": [
+     0.08,
+     0.9
+    ]
+   },
+   "source": "judgment",
+   "note": "Envelope of the corn and soybean rows across stages; used for wheat, milo, alfalfa, other and unknown stages."
+  },
+  {
+   "condition": "drought",
+   "crop": "any",
+   "stage_group": "any",
+   "loss": {
+    "low": [
+     0.0,
+     0.2
+    ],
+    "medium": [
+     0.016,
+     0.32
+    ],
+    "high": [
+     0.032,
+     0.44
+    ]
+   },
+   "source": "judgment",
+   "note": "Envelope of the corn and soybean rows across stages; used for wheat, milo, alfalfa, other and unknown stages."
+  },
+  {
+   "condition": "ponding",
+   "crop": "any",
+   "stage_group": "any",
+   "loss": {
+    "low": [
+     0,
+     0.18
+    ],
+    "medium": [
+     0.02,
+     0.42
+    ],
+    "high": [
+     0.04,
+     0.72
+    ]
+   },
+   "source": "judgment",
+   "note": "Envelope of the corn and soybean rows across stages; used for wheat, milo, alfalfa, other and unknown stages."
+  },
+  {
+   "condition": "nitrogen",
+   "crop": "any",
+   "stage_group": "any",
+   "loss": {
+    "low": [
+     0,
+     0.12
+    ],
+    "medium": [
+     0.002,
+     0.25
+    ],
+    "high": [
+     0.006,
+     0.4
+    ]
+   },
+   "source": "judgment",
+   "note": "Envelope of the corn and soybean rows across stages; used for wheat, milo, alfalfa, other and unknown stages."
+  },
+  {
+   "condition": "herbicide_drift",
+   "crop": "any",
+   "stage_group": "any",
+   "loss": {
+    "low": [
+     0,
+     0.15
+    ],
+    "medium": [
+     0.01,
+     0.35
+    ],
+    "high": [
+     0.03,
+     0.6
+    ]
+   },
+   "source": "judgment",
+   "note": "Envelope of the corn and soybean rows across stages; used for wheat, milo, alfalfa, other and unknown stages."
+  },
+  {
+   "condition": "planter_skip",
+   "crop": "any",
+   "stage_group": "any",
+   "loss": {
+    "low": [
+     0.03,
+     0.1
+    ],
+    "medium": [
+     0.06,
+     0.25
+    ],
+    "high": [
+     0.15,
+     0.5
+    ]
+   },
+   "source": "judgment",
+   "note": "Envelope of the corn and soybean rows across stages; used for wheat, milo, alfalfa, other and unknown stages."
+  },
+  {
+   "condition": "disease_pest",
+   "crop": "any",
+   "stage_group": "any",
+   "loss": {
+    "low": [
+     0,
+     0.15
+    ],
+    "medium": [
+     0,
+     0.35
+    ],
+    "high": [
+     0.01,
+     0.6
+    ]
+   },
+   "source": "judgment",
+   "note": "Envelope of the corn and soybean rows across stages; used for wheat, milo, alfalfa, other and unknown stages."
+  },
+  {
+   "condition": "sandy_soil_water_stress",
+   "crop": "any",
+   "stage_group": "any",
+   "loss": {
+    "low": [
+     0.0,
+     0.175
+    ],
+    "medium": [
+     0.014,
+     0.28
+    ],
+    "high": [
+     0.028,
+     0.385
+    ]
+   },
+   "source": "judgment",
+   "note": "Envelope of the corn and soybean rows across stages; used for wheat, milo, alfalfa, other and unknown stages."
+  },
+  {
+   "condition": "unknown",
+   "crop": "any",
+   "stage_group": "any",
+   "loss": {
+    "low": [
+     0.02,
+     0.08
+    ],
+    "medium": [
+     0.05,
+     0.2
+    ],
+    "high": [
+     0.1,
+     0.4
+    ]
+   },
+   "source": "judgment",
+   "note": "Generic placeholder range."
+  }
+ ]
+}
