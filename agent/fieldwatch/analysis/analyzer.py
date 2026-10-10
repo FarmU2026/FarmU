@@ -25,7 +25,8 @@ LOOKBACK_DAYS = 30
 PREVIOUS_DAYS = 40
 SEASONS = 3
 SEASON_WINDOW_DAYS = 10
-MAX_READS_PER_SLOT = 4
+MAX_READS_PER_SLOT = 6
+CANDIDATE_MAX_CLOUD = 90.0  # tile-wide cloud cover; the real test is the per-pixel clear fraction
 
 
 class NoScene(Exception):
@@ -82,8 +83,13 @@ class _Ctx:
 
     def first_clear(self, scenes: list[C.SceneInfo], min_clear: float):
         """First scene (in the given order) that is clear enough, else (None, best-seen)."""
-        best = None
-        for s in scenes[:MAX_READS_PER_SLOT]:
+        best, tried = None, set()
+        for s in scenes:
+            if len(tried) >= MAX_READS_PER_SLOT:
+                break
+            if _scene_date(s) in tried:  # overlapping tiles of one overpass share the same clouds
+                continue
+            tried.add(_scene_date(s))
             data, st = self.read(s)
             if best is None or st.clear_fraction > best[1].clear_fraction:
                 best = (data, st, s)
@@ -95,7 +101,7 @@ class _Ctx:
 def _season_stack(ctx: _Ctx, chosen: date, years_back: int, min_clear: float) -> IndexStack | None:
     target = _years_ago(chosen, years_back)
     found = ctx.loader.search(ctx.bbox, target - timedelta(days=SEASON_WINDOW_DAYS),
-                              target + timedelta(days=SEASON_WINDOW_DAYS), limit=10)
+                              target + timedelta(days=SEASON_WINDOW_DAYS), max_cloud=CANDIDATE_MAX_CLOUD, limit=10)
     found.sort(key=lambda s: abs((_scene_date(s) - target).days))
     hit, _ = ctx.first_clear(found, min_clear)
     return hit[1] if hit else None
@@ -127,7 +133,7 @@ def _analyze(req: C.FieldAnalysisRequest, loader: SceneLoader, writer: OverlayWr
     if req.scene is not None:
         candidates = [req.scene]
     else:
-        candidates = loader.search(ctx.bbox, as_of - timedelta(days=LOOKBACK_DAYS), as_of, limit=12)
+        candidates = loader.search(ctx.bbox, as_of - timedelta(days=LOOKBACK_DAYS), as_of, max_cloud=CANDIDATE_MAX_CLOUD, limit=12)
     if not candidates:
         raise NoScene(f"no Sentinel-2 scene within {LOOKBACK_DAYS} days before {req.as_of}")
 
@@ -140,7 +146,7 @@ def _analyze(req: C.FieldAnalysisRequest, loader: SceneLoader, writer: OverlayWr
     chosen = cur.date
 
     prev_scenes = [s for s in loader.search(ctx.bbox, chosen - timedelta(days=PREVIOUS_DAYS),
-                                            chosen - timedelta(days=1), limit=8) if _scene_date(s) < chosen]
+                                            chosen - timedelta(days=1), max_cloud=CANDIDATE_MAX_CLOUD, limit=8) if _scene_date(s) < chosen]
 
     def prev_job():
         h, _ = ctx.first_clear(prev_scenes, req.min_clear_fraction)

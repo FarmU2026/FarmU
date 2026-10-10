@@ -153,9 +153,9 @@ def test_live_summer_field():
     """Real Earth Search + COG reads for the demo field on a summer date (network, ~1 min)."""
     if os.getenv("FIELDWATCH_LIVE") != "1":
         pytest.skip("set FIELDWATCH_LIVE=1")
-    res = analyze(req(as_of="2025-07-25"), writer=NullWriter())
+    res = analyze(req(as_of="2025-08-22"), writer=NullWriter())
     C.FieldAnalysisResult.model_validate(res.model_dump())
     assert res.status in ("ok", "no_baseline"), res.error
-    assert res.date <= "2025-07-25" and res.clear_fraction >= 0.7
+    assert res.date <= "2025-08-22" and res.clear_fraction >= 0.7
     assert 0.3 < res.indices.ndvi.p50 < 1.0
     assert res.gates.senescence is False
