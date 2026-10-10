@@ -22,7 +22,7 @@ from .common import python_lambda
 
 DETAIL_TYPES = [
     "SceneAnalyzed", "AnomalyDetected", "WatchOpened", "InvestigationProgress", "InvestigationConcluded",
-    "ReplyReceived", "ApprovalRecorded", "ActionCompleted", "MessageSent", "MessageReceived",
+    "ReplyReceived", "ApprovalRecorded", "ActionCreated", "ActionCompleted", "MessageSent", "MessageReceived",
 ]  # keep in step with agent/cloud/feed/mapping.py EVENT_MODELS (tests/test_feed.py checks)
 NAMESPACE = "fieldwatch"
 API_KEY_NAME = "FeedKey"
