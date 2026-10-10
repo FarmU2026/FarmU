@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fieldwatch-agent"
+version = "0.1.0"
+description = "FieldWatch agent on AgentCore Runtime (Strands). Source is staged from agent/ by scripts/stage.py."
+requires-python = ">=3.10"
+# Light on purpose: the CodeZip is built for Linux ARM64 with --only-binary. Gateway tools need no raster stack.
+# The local-only imagery tool (rasterio, numpy, pillow, pystac-client) is not packaged; with
+# FIELDWATCH_TOOLS_BACKEND=gateway the Gateway Lambda runs it.
+dependencies = [
+    "aws-opentelemetry-distro ~= 0.18.0",
+    "bedrock-agentcore[strands-agents] >= 1.18.1",
+    "boto3 >= 1.35.0",
+    "botocore[crt] >= 1.35.0",
+    "httpx >= 0.27",
+    "mcp >= 1.28.1, < 2.0.0",
+    "pydantic >= 2",
+    "python-dotenv >= 1",
+    "requests >= 2.31",
+    "strands-agents >= 1.15.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
