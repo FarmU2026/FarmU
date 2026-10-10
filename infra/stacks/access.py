@@ -1,6 +1,6 @@
 """Who can touch FieldWatch in AWS (docs/decisions.md D3).
 
-- fieldwatch-github-deploy: assumed by GitHub Actions on kdumbl/FarmU (main branch or the
+- fieldwatch-github-deploy: assumed by GitHub Actions on FarmU2026/FarmU (main branch or the
   "deploy" environment) through the account's EXISTING GitHub OIDC provider. The provider is only
   referenced, never created or modified: it belongs to another project in this account.
 - fieldwatch-dev: what Kurt and Aaron assume for building and debugging. No CDK deploys (those run as
@@ -15,7 +15,7 @@ from aws_cdk import Duration, Stack, Tags
 from aws_cdk import aws_iam as iam
 from constructs import Construct
 
-GITHUB_REPO = "kdumbl/FarmU"
+GITHUB_REPOS = ["FarmU2026/FarmU", "kdumbl/FarmU"]  # current org home first; old path kept in case of a transfer back
 GITHUB_HOST = "token.actions.githubusercontent.com"
 BOUNDARY_NAME = "fieldwatch-boundary"
 DEVELOPERS = ["kurt", "aaron"]
@@ -41,13 +41,13 @@ class Access(Stack):
                 conditions={
                     "StringEquals": {f"{GITHUB_HOST}:aud": "sts.amazonaws.com"},
                     "StringLike": {f"{GITHUB_HOST}:sub": [
-                        f"repo:{GITHUB_REPO}:ref:refs/heads/main",
-                        f"repo:{GITHUB_REPO}:environment:deploy",
+                        sub for repo in GITHUB_REPOS
+                        for sub in (f"repo:{repo}:ref:refs/heads/main", f"repo:{repo}:environment:deploy")
                     ]},
                 },
                 assume_role_action="sts:AssumeRoleWithWebIdentity",
             ),
-            description="GitHub Actions deploys for FieldWatch (kdumbl/FarmU) via CDK bootstrap roles",
+            description="GitHub Actions deploys for FieldWatch (FarmU2026/FarmU) via CDK bootstrap roles",
         )
         deploy.add_to_policy(iam.PolicyStatement(
             actions=["sts:AssumeRole", "sts:TagSession"],

@@ -17,7 +17,8 @@ from stacks.access import Access
 from stacks.data_plane import DataPlane
 
 app = cdk.App()
-env = cdk.Environment(account=os.getenv("CDK_DEFAULT_ACCOUNT"), region=os.getenv("CDK_DEFAULT_REGION", "us-west-2"))
+# Region is fixed: the CDK CLI defaults to us-east-1 when no AWS config is present, and us-east-1 is off limits (D3).
+env = cdk.Environment(account=os.getenv("CDK_DEFAULT_ACCOUNT"), region="us-west-2")
 
 data = DataPlane(app, "FieldWatch-DataPlane", env=env)
 Access(app, "FieldWatch-Access", data=data, env=env)
