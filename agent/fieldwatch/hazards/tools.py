@@ -12,4 +12,8 @@ def field_polygon(field_id):
     farm = json.loads(config.FARM_FILE.read_text())
     field = next((f for f in farm['fields'] if f.get('id',f.get('field_id')) == field_id or f.get('name','').lower() == field_id.lower()), None)
     if not field: raise ValueError(f'unknown field {field_id}')
-    return field['polygon']
+    if field.get('polygon'): return field['polygon']
+    if field.get('bbox'):
+        west,south,east,north = field['bbox']
+        return [[west,south],[east,south],[east,north],[west,north]]
+    raise ValueError(f'field {field_id} lacks a polygon or bbox')

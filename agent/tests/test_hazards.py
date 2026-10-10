@@ -183,3 +183,11 @@ def test_context_conditional_race_does_not_overwrite(monkeypatch):
     monkeypatch.setattr(poll,'get_drought',lambda *a:drought_status('31173','2026-07-14',[dict(MapDate='20260714',D0=100,D1=60,D2=0,D3=0,D4=0)]))
     assert poll.handler({'as_of':'2026-07-14'})['updated']==0
     assert 'drought.#date <= :date' in seen[0]['ConditionExpression']
+
+
+def test_local_demo_boundary_adapter_supports_bbox(monkeypatch):
+    from fieldwatch import config
+    from fieldwatch.hazards.tools import field_polygon
+    monkeypatch.setattr(config,'TOOLS_BACKEND','local')
+    monkeypatch.setattr(config,'BUCKET','')
+    assert len(field_polygon('north-pivot'))==4
