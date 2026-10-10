@@ -1,0 +1,23 @@
+{
+  "replay": true,
+  "replay_id": "rpl_0001",
+  "stac_item": {
+    "type": "Feature",
+    "id": "S2B_14TPM_20260718_0_L2A",
+    "collection": "sentinel-2-c1-l2a",
+    "properties": {
+      "datetime": "2026-07-18T17:21:05Z",
+      "grid:code": "MGRS-14TPM",
+      "eo:cloud_cover": 3.1
+    },
+    "assets": {
+      "red": {
+        "href": "s3://example/red.tif"
+      }
+    }
+  },
+  "field_ids": [
+    "north-pivot"
+  ],
+  "as_of": "2026-07-18"
+}

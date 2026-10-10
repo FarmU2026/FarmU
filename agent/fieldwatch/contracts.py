@@ -241,8 +241,19 @@ class DiseaseReport(Contract):
     source: str = "EDDMapS (Corn ipmPIPE)"
 
 
+class FieldBaseline(Contract):
+    """What the context builder's baseline stage stores (WS1 `build_baseline`; see interfaces.AnalysisAPI)."""
+
+    key: str | None = Field(default=None, description="S3 key of baseline.parquet under context/{field_id}/")
+    seasons: list[int | str] = Field(default_factory=list, description="Prior seasons used (same weeks)")
+    cohort_field_ids: list[str] = Field(default_factory=list)
+    stub: bool = Field(default=False, description="True when the stage ran on sample data")
+
+
 class FieldContext(Contract):
-    """Per-field facts gathered by the context workstream (4); each part may be missing."""
+    """Per-field facts gathered by the context workstream (4); each part may be missing.
+
+    Stored flat in fw-field-context: each context-builder stage writes its own attributes."""
 
     schema_version: Literal["1"] = SCHEMA_VERSION
     field_id: str
@@ -256,6 +267,8 @@ class FieldContext(Contract):
     price_usd_bu: float | None = None
     price_as_of: ISODate | None = None
     stage: str | None = Field(default=None, description="Growth stage in words, e.g. 'R2 (blister)'")
+    disease_reports: list[DiseaseReport] = Field(default_factory=list, description="County reports (EDDMapS)")
+    baseline: FieldBaseline | None = None
     sources: list[str] = Field(default_factory=list)
 
 
@@ -455,12 +468,67 @@ class ApprovalRecorded(EventBase):
     decision: Literal["approved", "declined"]
     decided_by: str
     channel: Literal["sms", "web", "voice"]
+    farm_id: str | None = Field(default=None, description="Lets the projector skip the investigation lookup")
+
+
+ActionType = Literal["work_order", "scout_pin", "photo_request", "insurance_notice"]
+
+
+class ActionCreated(EventBase):
+    """A write tool recorded an action behind an approval (actions.py). The projector shows `action_created`."""
+
+    action_id: str
+    approval_id: str
+    investigation_id: str
+    type: ActionType
+    summary: str = Field(description="Plain words for the feed, e.g. the work-order instructions")
+    farm_id: str | None = None
+    assignee_person_id: str | None = None
+    field_name: str | None = None
+    delivered: bool = False
 
 
 class ActionCompleted(EventBase):
     action_id: str
     investigation_id: str
     completed_by: str
+    farm_id: str | None = None
+    photo_upload_id: str | None = None
+
+
+class MrmsFileAvailable(EventBase):
+    """A 24-hour MRMS hail-size file to process (replay backfill today; the hazards lane's hail filter consumes it)."""
+
+    bucket: str
+    key: str
+    product: str
+    valid_time: ISOTime
+
+
+class UploadLocation(Contract):
+    lon: float
+    lat: float
+    accuracy_m: float | None = None
+
+
+class UploadReceived(EventBase):
+    """Shared shape of PhotoReceived / DocumentReceived (intake lane, WS17)."""
+
+    upload_id: str
+    kind: Literal["photo", "document"]
+    field: FieldRef
+    investigation_id: str | None = None
+    s3_key: str
+    location: UploadLocation | None = None
+    result: dict[str, Any] | None = Field(default=None, description="PhotoResult or DocumentResult (intake lane)")
+
+
+class PhotoReceived(UploadReceived):
+    kind: Literal["photo"] = "photo"
+
+
+class DocumentReceived(UploadReceived):
+    kind: Literal["document"] = "document"
 
 
 class MessageSent(EventBase):
@@ -516,6 +584,76 @@ class AgentStep(Contract):
     hypotheses: list[Hypothesis] | None = None
     backend: Literal["local", "runtime"] = "local"
     error: ErrorDetail | None = None
+
+
+# ---------- scene pipeline requests (API -> scenes lane, WS2) ----------
+
+
+class SceneQueueMessage(Contract):
+    """Every message body fw-scene-queue accepts, normalized by `parse()`. On the wire a body is one of:
+
+    - a STAC item (Earth Search new-item message, or the check-latest Lambda), optionally wrapped in an SNS
+      `{"Type": "Notification", "Message": "<json>"}` envelope: parsed as replay=False;
+    - this model as JSON with replay=True (the replay Lambda; `stac_item` is the item to analyze).
+
+    Nothing else goes on the queue: "check now" invokes the check-latest Lambda (CheckLatestRequest), and
+    replay / reset invoke their Lambdas (ReplayRequest, ResetRequest).
+    """
+
+    replay: bool = False
+    replay_id: str | None = None
+    stac_item: dict[str, Any]
+    field_ids: list[str] | None = Field(default=None, description="Only these fields (default: every registered one)")
+    as_of: ISODate | None = Field(default=None, description="Replay date the analysis treats as 'today'")
+
+    @classmethod
+    def parse(cls, body: "str | dict[str, Any]") -> "SceneQueueMessage":
+        """Raw SQS body -> SceneQueueMessage. Raises ValueError for anything that is not an accepted shape."""
+        import json
+
+        data = json.loads(body) if isinstance(body, str) else body
+        if isinstance(data, dict) and data.get("Type") == "Notification" and "Message" in data:
+            data = json.loads(data["Message"])
+        if not isinstance(data, dict):
+            raise ValueError("message is not a JSON object")
+        if data.get("replay") and isinstance(data.get("stac_item"), dict):
+            return cls(replay=True, replay_id=data.get("replay_id"), stac_item=data["stac_item"],
+                       field_ids=data.get("field_ids"), as_of=data.get("as_of"))
+        if data.get("type") == "Feature" or "assets" in data:
+            return cls(replay=False, stac_item=data)
+        raise ValueError("message is neither a STAC item nor a replay envelope")
+
+
+class ReplayRequest(Contract):
+    """Invoke payload of the replay Lambda (fw-scene-replay): scene_id, or field_ids with as_of."""
+
+    schema_version: Literal["1"] = SCHEMA_VERSION
+    replay_id: str | None = None
+    scene_id: str | None = None
+    field_ids: list[str] | None = None
+    as_of: ISODate | None = None
+    farm_id: str | None = None
+    delay_s: int | None = Field(default=None, ge=0, le=900)
+    skip_hail: bool = False
+    requested_at: ISOTime | None = None
+
+
+class ResetRequest(Contract):
+    """Invoke payload of the reset Lambda (fw-scene-reset)."""
+
+    schema_version: Literal["1"] = SCHEMA_VERSION
+    farm_id: str | None = None
+    requested_at: ISOTime | None = None
+
+
+class CheckLatestRequest(Contract):
+    """Invoke payload of the check-latest Lambda (fw-scene-check-latest). Empty = every registered tile."""
+
+    schema_version: Literal["1"] = SCHEMA_VERSION
+    farm_id: str | None = None
+    field_ids: list[str] | None = Field(default=None, description="Only the tiles these fields sit on")
+    reason: Literal["schedule", "signup", "check_now"] = "schedule"
+    requested_at: ISOTime | None = None
 
 
 # ---------- web feed ----------
@@ -639,6 +777,14 @@ FIXTURE_MODELS: dict[str, type[Contract]] = {
     "investigation_concluded": InvestigationConcluded,
     "reply_received": ReplyReceived,
     "approval_recorded": ApprovalRecorded,
+    "action_created": ActionCreated,
+    "action_completed": ActionCompleted,
+    "mrms_file_available": MrmsFileAvailable,
+    "photo_received": PhotoReceived,
+    "scene_queue_message": SceneQueueMessage,
+    "replay_request": ReplayRequest,
+    "reset_request": ResetRequest,
+    "check_latest_request": CheckLatestRequest,
     "start_investigation": StartInvestigation,
     "resume_investigation": ResumeInvestigation,
     "agent_step": AgentStep,

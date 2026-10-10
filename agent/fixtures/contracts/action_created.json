@@ -1,0 +1,13 @@
+{
+  "schema_version": "1",
+  "occurred_at": "2026-07-18T17:21:05Z",
+  "action_id": "act-001",
+  "approval_id": "apr-001",
+  "investigation_id": "inv-north-pivot-20260718",
+  "type": "work_order",
+  "summary": "Check the nozzles and the end gun on the last tower.",
+  "farm_id": "wohleb-farm",
+  "assignee_person_id": "brother",
+  "field_name": "north pivot",
+  "delivered": true
+}

@@ -446,8 +446,10 @@ class TestDecide:
         assert len(aws.events.of("AnomalyDetected")) == 1
 
     def test_failed_emit_releases_the_claim_so_the_retry_emits(self, aws):
+        from fieldwatch.interfaces import FieldwatchError
+
         aws.events.fail = True
-        with pytest.raises(RuntimeError):
+        with pytest.raises(FieldwatchError):  # interfaces.publish_event: UPSTREAM_ERROR
             decide.handler(decide_event())
         assert idem_keys() == set()
         aws.events.fail = False

@@ -5,19 +5,21 @@ the approval must exist, be `approved`, belong to this investigation, match the 
 Each approval produces at most one action: the action id is derived from the approval id and written with a
 conditional put, so a retry (an interrupt that re-runs its tool, a Lambda retry) returns the same action.
 
-A work order or scouting pin is *delivered*: a text to the assignee. Delivery goes through
-`fieldwatch.notify.send` (workstream 9) when it exists, else `fieldwatch.sms.send`, behind `default_sender`.
-`ActionCompleted` is emitted only when `mark_done` flips the action to done.
+A work order or scouting pin is *delivered*: a text to the assignee. Delivery goes through the notify lane
+(`interfaces.notify()`, WS9's send Lambda) when one is configured, else the legacy `fieldwatch.sms.send`, behind
+`default_sender`. `ActionCreated` is emitted when an action is first recorded; `ActionCompleted` only when
+`mark_done` flips the action to done.
 """
 from __future__ import annotations
 
-import inspect
 import logging
 from typing import Any, Callable
 
 from . import approvals
 from . import contracts as C
-from .approvals import FieldwatchError, iso
+from . import interfaces as I
+from .approvals import iso
+from .interfaces import FieldwatchError
 
 log = logging.getLogger("fieldwatch.actions")
 
@@ -25,8 +27,8 @@ log = logging.getLogger("fieldwatch.actions")
 # keywords: person_id, phone, body, farm_id, investigation_id, idempotency_key, link
 Sender = Callable[..., dict]
 
-# Item keys that are not part of the Action contract.
-EXTRA_KEYS = {"field_name", "farm_id", "delivered", "delivery_detail", "created_at", "completed_by"}
+# Item keys that are not part of the Action contract (the full row is interfaces.ActionRecord).
+EXTRA_KEYS = set(I.ActionRecord.model_fields) - set(C.Action.model_fields)
 
 
 def action_id_for(approval_id: str) -> str:
@@ -58,28 +60,13 @@ def _local_phone(person_id: str) -> str | None:
 
 def default_sender(*, person_id: str, phone: str | None, body: str, farm_id: str | None,
                    investigation_id: str, idempotency_key: str, link: dict | None = None) -> dict:
-    """notify.send when workstream 9 has landed it, else sms.send.
-
-    notify.send is expected as `send(SendMessageRequest) -> SendMessageResult | dict` (the Lambda contract).
-    If it keeps the old `send(to, text)` shape, we call that with the person's phone.
-    """
+    """The notify lane (interfaces.NotifyAPI.send with a SendMessageRequest) when configured, else sms.send."""
     try:
-        from . import notify
-
-        fn = getattr(notify, "send", None)
-    except ImportError:
-        fn = None
-    try:
-        if fn is not None:
-            first = next(iter(inspect.signature(fn).parameters), "")
-            if first in ("to", "phone"):  # legacy shape
-                phone = phone or _local_phone(person_id)
-                if not phone:
-                    return {"ok": False, "detail": f"no phone number for {person_id}"}
-                return _norm(fn(phone, body))
+        service = I.notify()
+        if service is not None:
             req = C.SendMessageRequest(farm_id=farm_id or "", person_id=person_id, investigation_id=investigation_id,
                                        body=body, link=link, idempotency_key=idempotency_key)
-            return _norm(fn(req))
+            return _norm(service.send(req))
         from . import sms
 
         phone = phone or _local_phone(person_id)
@@ -120,7 +107,7 @@ def _require_approval(approval_id: str, investigation_id: str, action_type: str)
 
 
 def _to_action(item: dict) -> C.Action:
-    return C.Action.model_validate({k: v for k, v in item.items() if k not in EXTRA_KEYS})
+    return I.ActionRecord.model_validate(item).to_contract()
 
 
 # ---------- creating actions ----------
@@ -145,7 +132,9 @@ def _create(action_type: str, *, approval_id: str, investigation_id: str, assign
             "created_at": iso(approvals.clock()),
         }
         item = {k: v for k, v in item.items() if v is not None}
-        if not s.put_action_if_absent(item):  # lost a race: the other call's action is the one
+        if s.put_action_if_absent(item):
+            _emit_created(item)
+        else:  # lost a race: the other call's action is the one
             item = s.get_action(action_id)
     elif item["investigation_id"] != investigation_id or item["type"] != action_type:
         raise FieldwatchError("POLICY_DENIED", "approval was already used for a different action")
@@ -160,6 +149,14 @@ def _create(action_type: str, *, approval_id: str, investigation_id: str, assign
         s.update_action(action_id, delivered, only_if={"delivered": False})
         item = {**item, **delivered}
     return _to_action(item)
+
+
+def _emit_created(item: dict) -> None:
+    approvals.publish_event("ActionCreated", C.ActionCreated(
+        occurred_at=item["created_at"], action_id=item["action_id"], approval_id=item["approval_id"],
+        investigation_id=item["investigation_id"], type=item["type"], summary=_brief(item["instructions"], 200),
+        farm_id=item.get("farm_id"), assignee_person_id=item.get("assignee_person_id"),
+        field_name=item.get("field_name"), delivered=bool(item.get("delivered"))))
 
 
 def _brief(text: str, limit: int) -> str:
@@ -238,7 +235,7 @@ def work_order_view(action_id: str) -> C.WorkOrderView:
                            instructions=item["instructions"], status=item["status"], navigate_url=navigate_url(item["pin"]))
 
 
-def mark_done(action_id: str, by: str) -> C.Action:
+def mark_done(action_id: str, by: str, photo_upload_id: str | None = None) -> C.Action:
     """The assignee finished. Emits ActionCompleted once; marking a done action again changes nothing."""
     s = approvals.store()
     item = s.get_action(action_id)
@@ -246,11 +243,13 @@ def mark_done(action_id: str, by: str) -> C.Action:
         raise FieldwatchError("NOT_FOUND", f"no action {action_id}")
     if item["status"] != "done":
         fields = {"status": "done", "done_at": iso(approvals.clock()), "completed_by": by}
+        if photo_upload_id:
+            fields["photo_upload_id"] = photo_upload_id
         if s.update_action(action_id, fields, only_if={"status": "sent"}):
             item = {**item, **fields}
             approvals.publish_event("ActionCompleted", C.ActionCompleted(
                 occurred_at=fields["done_at"], action_id=action_id, investigation_id=item["investigation_id"],
-                completed_by=by))
+                completed_by=by, farm_id=item.get("farm_id"), photo_upload_id=photo_upload_id))
         else:  # someone else finished it first
             item = s.get_action(action_id) or item
     return _to_action(item)

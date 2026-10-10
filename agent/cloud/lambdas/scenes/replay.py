@@ -1,6 +1,6 @@
 """Replay Lambda (docs/implementation-specs.md "Replay API"; data-pipelines B5). Invoked by the API lane (`POST /v1/replay`).
 
-Request:  {scene_id?, field_ids?, as_of?, farm_id?, delay_s?, skip_hail?, replay_id?}
+Request:  contracts.ReplayRequest {scene_id?, field_ids?, as_of?, farm_id?, delay_s?, skip_hail?, replay_id?}
           either scene_id (optionally limited to field_ids) or field_ids + as_of (latest clear scene on or before as_of).
 Response: {replay_id, scenes: [{scene_id, source, datetime, tile_id, field_ids}], hail_events, delay_s}
           or an ErrorBody {error: {code, message, retryable}}.
@@ -8,7 +8,7 @@ Response: {replay_id, scenes: [{scene_id, source, datetime, tile_id, field_ids}]
 What it does: (1) publishes MrmsFileAvailable (source `fieldwatch.replay`) for the archived 24-hour hail-size files covering
 the 14 days before the scene, so the hazards lane opens the watches as they would have been; (2) sends a replay envelope
 {replay: true, replay_id, stac_item, field_ids?, as_of?} for each scene into fw-scene-queue, delayed a little so the watches
-exist when the scene is analyzed. Replaying twice without a reset is a no-op downstream (idempotent anomaly ids).
+exist when the scene is analyzed (contracts.SceneQueueMessage). Replaying twice without a reset is a no-op downstream (idempotent anomaly ids).
 """
 from __future__ import annotations
 
@@ -32,13 +32,7 @@ class ReplayError(Exception):
         self.code, self.retryable = code, retryable
 
 
-class MrmsFileAvailable(C.EventBase):
-    """`MrmsFileAvailable` (docs event catalog). Not in contracts.py yet: needs a contract PR."""
-
-    bucket: str
-    key: str
-    product: str
-    valid_time: C.ISOTime
+MrmsFileAvailable = C.MrmsFileAvailable  # moved to contracts.py; name kept for importers
 
 
 # ---------- Earth Search ----------
@@ -125,24 +119,24 @@ def hail_key(valid: datetime) -> str:
 
 
 def publish_hail_backfill(scene_dt: datetime) -> int:
-    entries = []
-    for valid in hail_file_times(scene_dt):
-        event = MrmsFileAvailable(occurred_at=cm.iso(cm.now()), bucket=cm.MRMS_BUCKET, key=hail_key(valid),
+    events = [C.MrmsFileAvailable(occurred_at=cm.iso(cm.now()), bucket=cm.MRMS_BUCKET, key=hail_key(valid),
                                   product=cm.MRMS_DAILY_PRODUCT, valid_time=cm.iso(valid))
-        entries.append({"source": cm.REPLAY_EVENT_SOURCE, "detail_type": "MrmsFileAvailable",
-                        "detail": event.model_dump(mode="json")})
-    cm.put_events(entries)
-    return len(entries)
+              for valid in hail_file_times(scene_dt)]
+    return cm.emit_all(events, cm.REPLAY_EVENT_SOURCE)
 
 
 # ---------- handler ----------
 
 
-def replay(req: dict) -> dict:
-    scene_id, field_ids, as_of = req.get("scene_id"), req.get("field_ids") or None, req.get("as_of")
+def replay(raw: dict) -> dict:
+    try:
+        req = C.ReplayRequest.model_validate(raw)
+    except ValueError as exc:
+        raise ReplayError("BAD_REQUEST", f"not a ReplayRequest: {exc}") from None
+    scene_id, field_ids, as_of = req.scene_id, req.field_ids or None, req.as_of
     if not scene_id and not (field_ids and as_of):
         raise ReplayError("BAD_REQUEST", "send scene_id, or field_ids with as_of")
-    replay_id = req.get("replay_id") or f"rpl_{uuid.uuid4().hex[:12]}"
+    replay_id = req.replay_id or f"rpl_{uuid.uuid4().hex[:12]}"
 
     # (stac item, fields to analyze or None for every registered field)
     plan: dict[str, tuple[dict, list[str] | None]] = {}
@@ -162,17 +156,17 @@ def replay(req: dict) -> dict:
         scenes.append((item, fids, info))
 
     hail = 0
-    if not req.get("skip_hail"):
+    if not req.skip_hail:
         for dt in sorted({cm.parse_time(info["datetime"]) for _, _, info in scenes}):
             hail += publish_hail_backfill(dt)
-    delay = int(req.get("delay_s", os.getenv("REPLAY_SCENE_DELAY_S", "30"))) if hail else 0
+    delay = int(req.delay_s if req.delay_s is not None else os.getenv("REPLAY_SCENE_DELAY_S", "30")) if hail else 0
     delay = max(0, min(delay, 900))
 
     queue_url = os.environ["SCENE_QUEUE_URL"]
     for item, fids, info in scenes:
-        envelope = {"replay": True, "replay_id": replay_id, "stac_item": item, "field_ids": fids,
-                    "as_of": as_of or info["datetime"][:10]}
-        cm.client("sqs").send_message(QueueUrl=queue_url, MessageBody=json.dumps(envelope), DelaySeconds=delay)
+        envelope = C.SceneQueueMessage(replay=True, replay_id=replay_id, stac_item=item, field_ids=fids,
+                                       as_of=as_of or info["datetime"][:10])
+        cm.client("sqs").send_message(QueueUrl=queue_url, MessageBody=envelope.model_dump_json(), DelaySeconds=delay)
 
     return {
         "replay_id": replay_id,

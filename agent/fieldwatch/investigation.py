@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 
 from strands.session import FileSessionManager
 
-from . import config
+from . import config, interfaces
 from . import contracts as C
 from .agents import build_supervisor
 from .config import SESSIONS
@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 
 LIMITS = {"turns": 20}
 SESSIONS_PREFIX = "sessions/"
-SOURCE = "fieldwatch.agent"
+SOURCE = interfaces.Sources.AGENT
 
 
 @dataclass
@@ -271,16 +271,7 @@ class Recorder:
     # -- bus events
     def _put(self, model: C.EventBase) -> None:
         try:
-            out = self.events.put_events(
-                Entries=[{
-                    "Source": SOURCE,
-                    "DetailType": type(model).__name__,
-                    "Detail": model.model_dump_json(),
-                    "EventBusName": self.bus,
-                }]
-            )
-            if out.get("FailedEntryCount"):
-                log.error("PutEvents rejected %s: %s", type(model).__name__, out.get("Entries"))
+            interfaces.publish_event(model, source=SOURCE, client=self.events, bus=self.bus)
         except Exception:
             log.exception("could not emit %s", type(model).__name__)
 

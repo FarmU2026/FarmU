@@ -373,10 +373,19 @@ def test_default_sender_falls_back_to_sms(monkeypatch):
 
 
 def test_default_sender_prefers_notify_send(monkeypatch):
-    import fieldwatch.notify as notify
+    from fieldwatch import interfaces
 
     got = []
-    monkeypatch.setattr(notify, "send", lambda req: got.append(req) or {"status": "sent", "message_id": "m1"}, raising=False)
+
+    class FakeNotify:
+        def send(self, req):
+            got.append(req)
+            return C.SendMessageResult(message_id="m1", status="sent", provider="twilio")
+
+        def reply(self, message):
+            return {}
+
+    interfaces.use_notify(FakeNotify())
     res = actions.default_sender(person_id="brother", phone=None, body="hi", farm_id="f", investigation_id="inv-1",
                                  idempotency_key="k", link={"scope": "work_order", "subject_id": "a", "ttl_hours": 72})
     assert res["ok"] and isinstance(got[0], C.SendMessageRequest) and got[0].person_id == "brother"

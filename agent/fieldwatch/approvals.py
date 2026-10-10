@@ -26,6 +26,8 @@ from typing import Any, Callable, Protocol
 
 from . import config
 from . import contracts as C
+from . import interfaces as I
+from .interfaces import FieldwatchError  # noqa: F401  (re-exported: `from fieldwatch.approvals import FieldwatchError`)
 
 log = logging.getLogger("fieldwatch.approvals")
 
@@ -34,19 +36,7 @@ KEEP_AFTER_EXPIRY = timedelta(days=7)  # DynamoDB TTL deletes lazily; keep the r
 ACTION_TYPES = ("work_order", "scout_pin", "photo_request", "insurance_notice")
 
 
-# ---------- errors (codes from implementation-specs "Gateway tools" / "Web API") ----------
-
-
-class FieldwatchError(Exception):
-    """Carries a spec error code: NOT_FOUND, POLICY_DENIED, ALREADY_DECIDED, EXPIRED, INVALID_INPUT, ..."""
-
-    def __init__(self, code: str, message: str, *, retryable: bool = False, **details: Any):
-        super().__init__(f"{code}: {message}")
-        self.code, self.message, self.retryable, self.details = code, message, retryable, details
-
-    def body(self) -> dict:
-        """The spec's ErrorBody shape."""
-        return {"error": {"code": self.code, "message": self.message, "retryable": self.retryable, **self.details}}
+# Errors: FieldwatchError lives in fieldwatch.interfaces (one error type for every lane) and is re-exported here.
 
 
 # ---------- time ----------
@@ -73,8 +63,9 @@ def _expired(item: dict) -> bool:
 
 # ---------- storage interface ----------
 
-# Internal items are the Approval fields plus: created_at, sent_to_phone (optional), expires_at_epoch (TTL).
-INTERNAL_KEYS = {"created_at", "sent_to_phone", "expires_at_epoch"}
+# Items are interfaces.ApprovalRecord: the Approval fields plus created_at, sent_to_phone?, farm_id? and
+# expires_at_epoch (TTL). Notify's send (WS9) writes the same shape when a message asks a question.
+INTERNAL_KEYS = {"created_at", "sent_to_phone", "expires_at_epoch", "farm_id"}
 
 
 class Store(Protocol):
@@ -322,31 +313,25 @@ def set_event_sink(sink: Callable[[str, dict], None] | None) -> None:
 
 
 def publish_event(detail_type: str, model: C.Contract) -> None:
-    """Put one event on the `fieldwatch` bus (source fieldwatch.approvals). Never raises: the decision is
-    already recorded, and a re-emit is available through `emit_approval_recorded`."""
-    detail = model.model_dump(mode="json")
+    """Put one event on the `fieldwatch` bus (source fieldwatch.approvals) through interfaces.publish_event.
+    Never raises: the decision is already recorded, and a re-emit is available through `emit_approval_recorded`."""
+    if detail_type != type(model).__name__:
+        raise FieldwatchError("INVALID_INPUT", f"detail_type {detail_type} does not match {type(model).__name__}")
     if _event_sink is not None:
-        _event_sink(detail_type, detail)
+        _event_sink(detail_type, model.model_dump(mode="json"))
         return
     if backend() != "dynamo":
         return
     try:
-        import boto3
-
-        boto3.client("events", region_name=config.REGION).put_events(Entries=[{
-            "EventBusName": config.EVENT_BUS,
-            "Source": "fieldwatch.approvals",
-            "DetailType": detail_type,
-            "Detail": json.dumps(detail),
-        }])
+        I.publish_event(model, source=I.Sources.APPROVALS)
     except Exception:
         log.exception("could not publish %s", detail_type)
 
 
-def emit_approval_recorded(a: C.Approval) -> None:
+def emit_approval_recorded(a: C.Approval, farm_id: str | None = None) -> None:
     publish_event("ApprovalRecorded", C.ApprovalRecorded(
         occurred_at=a.decided_at or iso(clock()), approval_id=a.approval_id, investigation_id=a.investigation_id,
-        decision=a.status, decided_by=a.decided_by, channel=a.channel))  # type: ignore[arg-type]
+        decision=a.status, decided_by=a.decided_by, channel=a.channel, farm_id=farm_id))  # type: ignore[arg-type]
 
 
 # ---------- public functions ----------
@@ -354,10 +339,10 @@ def emit_approval_recorded(a: C.Approval) -> None:
 
 def _to_model(item: dict) -> C.Approval:
     """Apply expiry on read: a pending record past its time reads as 'expired'."""
-    data = {k: v for k, v in item.items() if k not in INTERNAL_KEYS}
-    if data["status"] == "pending" and _expired(data):
-        data["status"] = "expired"
-    return C.Approval.model_validate(data)
+    a = I.ApprovalRecord.model_validate(item).to_contract()
+    if a.status == "pending" and _expired(item):
+        a = a.model_copy(update={"status": "expired"})
+    return a
 
 
 def approval_id_for(investigation_id: str, action_type: str, summary: str) -> str:
@@ -373,7 +358,7 @@ def e164(phone: str) -> str:
 
 def create_pending(investigation_id: str, action_type: str, summary: str, sent_to_person_id: str,
                    ttl_hours: float = DEFAULT_TTL_HOURS, *, approval_id: str | None = None,
-                   sent_to_phone: str | None = None) -> C.Approval:
+                   sent_to_phone: str | None = None, farm_id: str | None = None) -> C.Approval:
     """Write a pending approval. With an explicit `approval_id` this is idempotent: a second call returns
     the existing record untouched (whatever its status)."""
     if action_type not in ACTION_TYPES:
@@ -391,6 +376,7 @@ def create_pending(investigation_id: str, action_type: str, summary: str, sent_t
         "expires_at": iso(now + timedelta(hours=ttl_hours)),
         "created_at": iso(now),
         "sent_to_phone": e164(sent_to_phone) if sent_to_phone else None,
+        "farm_id": farm_id,
     }
     item = {k: v for k, v in item.items() if v is not None}
     s = store()
@@ -419,9 +405,12 @@ _DECISIONS = {
 
 
 def record_decision(approval_id: str, decision: str, decided_by_person_id: str, channel: str,
-                    from_phone: str | None = None) -> C.Approval:
+                    from_phone: str | None = None, *, emit: bool = True) -> C.Approval:
     """Record the answer. Raises FieldwatchError: NOT_FOUND, POLICY_DENIED (wrong person or number),
-    ALREADY_DECIDED (details: decided_by, decided_at, status), EXPIRED, INVALID_INPUT."""
+    ALREADY_DECIDED (details: decided_by, decided_at, status), EXPIRED, INVALID_INPUT.
+
+    emit=False when the caller publishes ApprovalRecorded itself (the notify reply handler does, so one YES
+    produces exactly one event)."""
     status = _DECISIONS.get(str(decision).strip().lower())
     if status is None:
         raise FieldwatchError("INVALID_INPUT", f"decision must be approve or decline, got {decision!r}")
@@ -446,8 +435,10 @@ def record_decision(approval_id: str, decision: str, decided_by_person_id: str, 
     if not s.decide(approval_id, status, fields):
         _raise_if_decided(s.get_approval(approval_id) or item)
         raise FieldwatchError("ALREADY_DECIDED", "this approval changed while recording", retryable=True)
-    result = _to_model(s.get_approval(approval_id))
-    emit_approval_recorded(result)
+    stored = s.get_approval(approval_id)
+    result = _to_model(stored)
+    if emit:
+        emit_approval_recorded(result, farm_id=(stored or {}).get("farm_id"))
     return result
 
 

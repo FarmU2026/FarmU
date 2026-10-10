@@ -27,9 +27,12 @@ def _isolated_agent_data(tmp_path, monkeypatch):
         monkeypatch.setattr(srv, "IMAGES", data / "images")
 
     def reset():
+        from fieldwatch import interfaces
+
         approvals.use_store(None)
         approvals.set_event_sink(None)
         approvals._store_cache.clear()
+        interfaces.use_notify(None)
 
     reset()
     yield data
