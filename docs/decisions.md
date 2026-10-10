@@ -24,14 +24,17 @@ The plan docs describe the target. This file records where the build deliberatel
 The AgentCore CLI already deploys with CDK (spike finding 31), so everything uses CDK.
 - `infra/` is a **Python CDK app** for the data plane and pipelines: one shared `DataPlane` stack (bucket, tables, bus) plus **one stack per workstream**, named `FieldWatch-<Workstream>`.
 - The agent, Gateway and AgentCore Memory are managed by the **AgentCore CLI** project in `agent/cloud/agentcore/`.
-- Only the integrator deploys `DataPlane`. Each workstream deploys only its own stack.
+- Shared stacks: `FieldWatch-DataPlane` (tables, bus, bucket) and `FieldWatch-Access` (roles, users). Only Caleb or the deploy workflow deploys; Kurt and Aaron write stacks and open PRs.
 - Everything is tagged `project=fieldwatch`.
 
-## D3. Account and region
+## D3. Account, region and access
 
-- One shared account (the team's), region **us-east-2**, matching the team's Bedrock setup. Sentinel-2 files live in us-west-2; cross-region reads of a few MB per field cost fractions of a cent, so we accept them.
-- Bedrock API keys work for model calls only. **Gateway and Runtime calls need IAM credentials** (SigV4); each person gets IAM access keys.
-- CDK bootstrap the account once, deliberately (finding 36).
+- **Caleb's AWS account, region us-west-2**: where the spikes validated everything, next to the Sentinel-2 files. Budget alert $50/month.
+- The account also hosts another project. Never create `preflight-*` or `pr-*` names, never use the tag `preflight-derive`, never create or modify the account's GitHub OIDC provider (we reference it). The `fieldwatch-boundary` permissions boundary (`infra/policies/`) enforces this on every FieldWatch role, user and the CDK execution role.
+- **Deploys:** Caleb from his machine, and GitHub Actions (`.github/workflows/deploy.yml`) through role `fieldwatch-github-deploy`, which trusts the existing GitHub OIDC provider for `kdumbl/FarmU` main or the `deploy` environment only. Role ARNs and the account ID live in GitHub variables, never in code.
+- **Kurt and Aaron** use IAM users `fieldwatch-kurt` / `fieldwatch-aaron`, which can only assume `fieldwatch-dev`: Bedrock, FieldWatch tables and bucket, Lambda invoke, logs, events, AgentCore invoke. No CDK deploys (the CDK execution role is admin-level); ask Caleb or merge to main.
+- Local agent runs may keep using a Bedrock API key in `agent/.env` (any account/region); API keys can't sign Gateway/Runtime calls, so cloud mode uses IAM credentials.
+- CDK is bootstrapped once, with the boundary (finding 36).
 
 ## D4. Models
 

@@ -1,0 +1,79 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowEverythingElse",
+      "Effect": "Allow",
+      "Action": "*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ProtectOtherProjectIdentities",
+      "Effect": "Deny",
+      "Action": "iam:*",
+      "Resource": [
+        "arn:aws:iam::*:role/preflight-*",
+        "arn:aws:iam::*:role/pr-*",
+        "arn:aws:iam::*:policy/preflight-*",
+        "arn:aws:iam::*:policy/pr-*",
+        "arn:aws:iam::*:user/CalebPrimary",
+        "arn:aws:iam::*:oidc-provider/*"
+      ]
+    },
+    {
+      "Sid": "NoOtherProjectNamesAnywhere",
+      "Effect": "Deny",
+      "NotAction": [
+        "iam:Get*",
+        "iam:List*",
+        "sts:GetCallerIdentity"
+      ],
+      "Resource": [
+        "arn:aws:*:*:*:*preflight-*",
+        "arn:aws:*:*:*:*/pr-*",
+        "arn:aws:*:*:*:*:pr-*"
+      ]
+    },
+    {
+      "Sid": "NeverUseTheSweepTag",
+      "Effect": "Deny",
+      "Action": "*",
+      "Resource": "*",
+      "Condition": {
+        "ForAnyValue:StringLike": {
+          "aws:TagKeys": ["preflight-derive", "preflight-derive*"]
+        }
+      }
+    },
+    {
+      "Sid": "NoAccountLevelChanges",
+      "Effect": "Deny",
+      "Action": [
+        "organizations:*",
+        "account:*",
+        "iam:CreateAccountAlias",
+        "iam:DeleteAccountAlias",
+        "iam:UpdateAccountPasswordPolicy",
+        "iam:DeleteAccountPasswordPolicy"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "BoundaryCannotBeRemovedOrEdited",
+      "Effect": "Deny",
+      "Action": [
+        "iam:DeleteRolePermissionsBoundary",
+        "iam:DeleteUserPermissionsBoundary",
+        "iam:CreatePolicyVersion",
+        "iam:DeletePolicyVersion",
+        "iam:SetDefaultPolicyVersion",
+        "iam:DeletePolicy"
+      ],
+      "Resource": [
+        "arn:aws:iam::*:role/*",
+        "arn:aws:iam::*:user/*",
+        "arn:aws:iam::*:policy/fieldwatch-boundary"
+      ]
+    }
+  ]
+}

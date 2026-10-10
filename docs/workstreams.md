@@ -15,7 +15,7 @@ How the remaining work is split so three people and their Claude Code agents can
   ```
   Paste the workstream's prompt below. Ask for a plan first, then let it implement.
 - **Contract changes** go in their own small PR, announced in team chat. Never change a contract inside a feature PR.
-- **Deploy only your own CDK stack** (`infra/`, D2). The integrator deploys `FieldWatch-DataPlane`.
+- **Deploys:** Caleb (or the deploy workflow on main) deploys every stack. Kurt and Aaron write their stacks and open PRs, and use the `fieldwatch-dev` role for Bedrock, data and logs (D3).
 
 ## Shared files and their owners
 
@@ -100,4 +100,4 @@ Write your own checks from the goal first (Build Plan "the loop for every ticket
 
 ## Prompt template (paste into the workstream's Claude Code session)
 
-> You are working on FieldWatch (repo FarmU), workstream **N: <name>**. Read `CLAUDE.md`, `docs/decisions.md`, `docs/spike-findings.md`, and the plan sections listed for workstream N in `docs/workstreams.md` (plan docs are in `docs/`). Decisions and spike findings override the plan docs. Build against `agent/fieldwatch/contracts.py` and the samples in `agent/fixtures/contracts/`; do not change contracts. Edit only the paths listed for workstream N. Goal: <paste the goal>. First write the checks and tests for that goal (no network or AWS in unit tests; mark live tests `@pytest.mark.live`), then propose a plan, then implement. Run `python -m pytest tests -q -m "not live"` from `agent/` before finishing. If the goal needs AWS, deploy only `FieldWatch-<YourStack>` in us-east-2.
+> You are working on FieldWatch (repo FarmU), workstream **N: <name>**. Read `CLAUDE.md`, `docs/decisions.md`, `docs/spike-findings.md`, and the plan sections listed for workstream N in `docs/workstreams.md` (plan docs are in `docs/`). Decisions and spike findings override the plan docs. Build against `agent/fieldwatch/contracts.py` and the samples in `agent/fixtures/contracts/`; do not change contracts. Edit only the paths listed for workstream N. Goal: <paste the goal>. First write the checks and tests for that goal (no network or AWS in unit tests; mark live tests `@pytest.mark.live`), then propose a plan, then implement. Run `python -m pytest tests -q -m "not live"` from `agent/` before finishing. If the goal needs AWS: region us-west-2; add your stack to `infra/` but do not deploy unless you are Caleb.

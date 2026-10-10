@@ -9,7 +9,7 @@ load_dotenv(ROOT / ".env")
 FIXTURES = ROOT / "fixtures"
 SESSIONS = ROOT / "sessions"
 
-REGION = os.getenv("AWS_REGION", "us-east-2")  # docs/decisions.md D3
+REGION = os.getenv("AWS_REGION", "us-west-2")  # docs/decisions.md D3 (a local .env may override for Bedrock)
 
 # Which model backs every agent. Set FIELDWATCH_PROVIDER to one of:
 #   bedrock  (default) Bedrock, paid from the $100 free-tier credit. Model via FIELDWATCH_MODEL.
