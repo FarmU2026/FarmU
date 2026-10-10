@@ -1,0 +1,11 @@
+{
+  "action_id": "act-001",
+  "field_name": "north pivot",
+  "pin": [
+    -96.54,
+    42.1535
+  ],
+  "instructions": "Check the outer span nozzles and end tower on the north pivot",
+  "status": "sent",
+  "navigate_url": "https://maps.google.com/?q=42.1535,-96.54"
+}
