@@ -36,7 +36,7 @@ How the remaining work is split so three people and their Claude Code agents can
 | 0 | Foundation + integration | Caleb | contracts, registry, config, infra/app.py, CI, merges | — | T01–T04, T06 |
 | 1 | Field analyzer | Aaron | `agent/fieldwatch/analysis/`, `tests/test_analysis*.py` | contracts | T11, T13; pipelines B2, M1–M3 |
 | 2 | Orchestration + replay + trigger | Caleb | `agent/fieldwatch/trigger.py`, `agent/cloud/lambdas/scene_check/`, `agent/cloud/lambdas/session_starter/`, `infra/stacks/analysis.py` | WS1 (stub ok) | T14, T34 |
-| 3 | Hazards | Kurt | `agent/fieldwatch/hazards.py`, `infra/stacks/hazards.py`, `tests/test_hazards.py` | contracts | T15, T16; pipelines C1–C4 |
+| 3 | Hazards | Kurt | `agent/fieldwatch/hazards/`, `infra/stacks/hazards.py`, `tests/test_hazards.py` | contracts | T15, T16; pipelines C1–C4 |
 | 4 | Field context | Kurt | `agent/fieldwatch/context/`, `tests/test_context.py` | contracts | T08–T10, T12, T26; pipelines A1–A10 |
 | 5 | Scorer, catalog, impact, agent reasoning | Aaron | `agent/catalog/`, `agent/fieldwatch/scoring.py`, `agent/fieldwatch/agents.py`, `agent/fieldwatch/schemas.py`, `tests/test_scoring.py` | contracts | T20; pipelines M4–M5 |
 | 6 | Gateway tools | Caleb | `agent/cloud/gateway/`, `agent/fieldwatch/toolset.py`, `infra/stacks/tools.py` | registry | T19, T21 |

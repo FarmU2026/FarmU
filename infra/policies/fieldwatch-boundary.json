@@ -29,9 +29,28 @@
         "sts:GetCallerIdentity"
       ],
       "Resource": [
-        "arn:aws:*:*:*:*preflight-*",
-        "arn:aws:*:*:*:*/pr-*",
-        "arn:aws:*:*:*:*:pr-*"
+        "arn:aws:lambda:*:*:function:preflight-*",
+        "arn:aws:lambda:*:*:function:pr-*",
+        "arn:aws:dynamodb:*:*:table/preflight-*",
+        "arn:aws:dynamodb:*:*:table/pr-*",
+        "arn:aws:s3:::preflight-*",
+        "arn:aws:s3:::pr-*",
+        "arn:aws:cloudformation:*:*:stack/preflight-*",
+        "arn:aws:cloudformation:*:*:stack/pr-*",
+        "arn:aws:logs:*:*:log-group:*preflight-*",
+        "arn:aws:logs:*:*:log-group:*/pr-*",
+        "arn:aws:events:*:*:rule/preflight-*",
+        "arn:aws:events:*:*:event-bus/preflight-*",
+        "arn:aws:sqs:*:*:preflight-*",
+        "arn:aws:sqs:*:*:pr-*",
+        "arn:aws:sns:*:*:preflight-*",
+        "arn:aws:sns:*:*:pr-*",
+        "arn:aws:states:*:*:stateMachine:preflight-*",
+        "arn:aws:states:*:*:stateMachine:pr-*",
+        "arn:aws:ecr:*:*:repository/preflight-*",
+        "arn:aws:ecr:*:*:repository/pr-*",
+        "arn:aws:ssm:*:*:parameter/preflight*",
+        "arn:aws:ssm:*:*:parameter/pr-*"
       ]
     },
     {
