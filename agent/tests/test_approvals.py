@@ -430,3 +430,26 @@ def test_agent_decline_records_declined_and_sends_nothing(tmp_path, monkeypatch)
         assert actions.get_action(actions.action_id_for(a.approval_id)) is None and sent == []
     finally:
         approvals.use_store(None)
+
+
+# ---------- Cedar policy file ----------
+
+
+def test_cedar_policy_covers_registry():
+    import re
+    from pathlib import Path
+
+    from fieldwatch.registry import TOOLS
+
+    text = (Path(__file__).resolve().parents[2] / "infra" / "policies" / "cedar" / "fieldwatch-gateway.cedar").read_text()
+    blocks = {m.group(1): m.group(2) for m in re.finditer(r"// ---- policy: (\S+) ----\n(.*?)(?=\n// ---- policy:|\Z)", text, re.S)}
+    assert set(blocks) == {"fieldwatch-read-tools", "fieldwatch-write-tools-need-approval", "fieldwatch-messaging-tools"}
+    tools_in = {n: set(re.findall(r'\{\{TARGET\}\}___(\w+)"', b)) for n, b in blocks.items()}
+    for spec in TOOLS:
+        home = "fieldwatch-write-tools-need-approval" if spec.access == "write" else "fieldwatch-read-tools"
+        assert spec.name in tools_in[home], f"{spec.name} missing from the Cedar {home} policy"
+        for other, names in tools_in.items():
+            assert other == home or spec.name not in names, f"{spec.name} also in {other}"
+    guard = blocks["fieldwatch-write-tools-need-approval"]
+    assert "context.input.approval_id like" in guard and "context.input.investigation_id" in guard
+    assert "when" in guard and "when" not in blocks["fieldwatch-read-tools"]
