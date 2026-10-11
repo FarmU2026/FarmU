@@ -26,12 +26,13 @@ from dataclasses import dataclass
 from typing import Literal
 
 from fieldwatch import config
+from fieldwatch.interfaces import LINK_PAGES
 
 Scope = Literal["onboard", "report", "upload", "work_order", "dashboard"]
 SCOPES: tuple[str, ...] = ("onboard", "report", "upload", "work_order", "dashboard")
 
-# Page paths on the front end (WS14) for each scope.
-PAGES = {"report": "report.html", "work_order": "work-order.html", "upload": "upload.html", "onboard": "index.html"}
+# Page and id parameter on the front end (WS14) for each scope: interfaces.LINK_PAGES (also used by notify).
+PAGES = {scope: page for scope, (page, _param) in LINK_PAGES.items()}
 
 _KEY_CACHE: dict[str, bytes] = {}
 
@@ -105,13 +106,16 @@ def verify(token: str | None, scope: str | None = None, subject_id: str | None =
         payload, sig = _b64d(p64), _b64d(s64)
     except (ValueError, TypeError):
         raise LinkError("TOKEN_SCOPE", "Malformed link token") from None
-    want = hmac.new(key or get_key(), payload, hashlib.sha256).digest()
-    if not hmac.compare_digest(want, sig):
+    k = key or get_key()
+    want = hmac.new(k, payload, hashlib.sha256).digest()
+    # Tokens from the notify lane (fieldwatch.notify.links) sign the base64 text and name the claim subject_id.
+    want_notify = hmac.new(k, p64.encode(), hashlib.sha256).digest()
+    if not (hmac.compare_digest(want, sig) or hmac.compare_digest(want_notify, sig)):
         raise LinkError("TOKEN_SCOPE", "Link token signature does not match")
     try:
         d = json.loads(payload)
-        claims = LinkClaims(farm_id=str(d["farm_id"]), scope=str(d["scope"]), subject_id=str(d["sub"]),
-                            exp=int(d["exp"]))
+        claims = LinkClaims(farm_id=str(d["farm_id"]), scope=str(d["scope"]),
+                            subject_id=str(d["sub"] if "sub" in d else d["subject_id"]), exp=int(d["exp"]))
     except (ValueError, KeyError, TypeError):
         raise LinkError("TOKEN_SCOPE", "Malformed link token") from None
     if claims.exp < (now if now is not None else time.time()):
@@ -124,6 +128,6 @@ def verify(token: str | None, scope: str | None = None, subject_id: str | None =
 
 
 def url(base_url: str, scope: str, subject_id: str, token: str) -> str:
-    """Farmer-facing link on the front end, e.g. https://d.cloudfront.net/report.html?id=inv_1&t=..."""
-    page = PAGES.get(scope, "index.html")
-    return f"{base_url.rstrip('/')}/{page}?id={subject_id}&t={token}"
+    """Farmer-facing link on the front end, e.g. https://d.cloudfront.net/report.html?inv=inv_1&t=..."""
+    page, param = LINK_PAGES.get(scope, ("index.html", "id"))
+    return f"{base_url.rstrip('/')}/{page}?{param}={subject_id}&t={token}"
