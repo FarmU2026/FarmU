@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import actions as A
 from . import contracts as C
 from . import context as CT
+from . import scoring as S
 from . import tools as T
 from . import hazards as H
 from .config import FIXTURES
@@ -122,6 +123,12 @@ def _sample(name: str, model: type[BaseModel]) -> Callable:
     return fn
 
 
+def analyze_field(**kwargs) -> C.FieldAnalysisResult:
+    from .analysis import analyze  # lazy: rasterio and scipy load only when the tool runs
+
+    return analyze(C.FieldAnalysisRequest.model_validate(kwargs))
+
+
 TOOLS: list[ToolSpec] = [
     # --- live today (tools.py); outputs still untyped dicts, typed by their workstream ---
     ToolSpec("list_fields", "List every field on the farm with its id, name, crop and acres.", "read",
@@ -137,8 +144,7 @@ TOOLS: list[ToolSpec] = [
     # --- planned: stubs return contract samples until the workstream lands ---
     ToolSpec("analyze_field", "Deterministic analysis of the latest clear scene on or before as_of: masked indices, "
              "baseline and change z-scores, problem regions with pattern features, gates.", "read",
-             C.FieldAnalysisRequest, _sample("field_analysis_result", C.FieldAnalysisResult),
-             output_model=C.FieldAnalysisResult, workstream=1, stub=True),
+             C.FieldAnalysisRequest, analyze_field, output_model=C.FieldAnalysisResult, workstream=1),
     ToolSpec("get_hail", "Max radar hail size (mm) over a field for a date range, plus nearby ground reports.", "read",
              FieldRangeIn, H.get_hail, output_model=C.HailReport, workstream=3),
     ToolSpec("get_drought", "US Drought Monitor category for a county as of a date.", "read",
@@ -150,9 +156,9 @@ TOOLS: list[ToolSpec] = [
     ToolSpec("get_disease_reports", "County disease confirmations for the season (EDDMapS).", "read",
              DiseaseIn, CT.get_disease_reports, output_model=C.DiseaseReport, workstream=4),
     ToolSpec("score_hypotheses", "Deterministic hypothesis probabilities from evidence items and the condition catalog.",
-             "read", C.ScoreRequest, _sample("score_result", C.ScoreResult), output_model=C.ScoreResult, workstream=5, stub=True),
+             "read", C.ScoreRequest, S.score_hypotheses, output_model=C.ScoreResult, workstream=5),
     ToolSpec("estimate_impact", "Dollar range for a condition on the affected acres, from published loss tables.", "read",
-             C.ImpactRequest, _sample("impact_estimate", C.ImpactEstimate), output_model=C.ImpactEstimate, workstream=5, stub=True),
+             C.ImpactRequest, S.estimate_impact, output_model=C.ImpactEstimate, workstream=5),
     # --- write tools (workstream 8): need an approved approval_id; see actions.py ---
     ToolSpec("create_work_order", "Send a repair work order to the assignee. Requires an approved approval_id.", "write",
              WorkOrderIn, A.create_work_order, output_model=C.Action, workstream=8,
