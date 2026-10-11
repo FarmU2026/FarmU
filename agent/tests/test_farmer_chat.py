@@ -11,7 +11,7 @@ from fieldwatch import contracts as C
 from fieldwatch.hooks import ToolTimeline
 from runtime_support import REGION, FakeModel, _text, _tool_use, make_bus_with_queue, make_investigations_table
 
-WRITE_AND_MESSAGE_TOOLS = {"create_work_order", "create_scout_pin", "request_photo", "send_farmer_message"}
+WRITE_AND_MESSAGE_TOOLS = {"create_work_order", "create_scout_pin", "send_farmer_message"}  # request_photo is off
 QUESTION = "Explain the data you have access to."
 
 

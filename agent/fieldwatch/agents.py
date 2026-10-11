@@ -599,9 +599,9 @@ For the field you are asked about (call list_fields once to get its id, then use
 3. Call score_hypotheses. It scores all the evidence the specialists returned.
 4. Call estimate_impact for the most likely condition, using the problem-area acres from the evidence, for a
    dollar range.
-5. Decide one action: a repair work order to the person who does repairs, a scouting pin, or a photo request
-   when the score says close_call or how_sure is "not sure, need a photo". Propose the action by CALLING its tool
-   (create_work_order, create_scout_pin or request_photo), never by just asking in text: the call is what pauses
+5. Decide one action: a repair work order to the person who does repairs, or a scouting pin (someone walks the
+   spot) when the score says close_call or the cause needs eyes on the ground. Propose the action by CALLING its
+   tool (create_work_order or create_scout_pin), never by just asking in text: the call is what pauses
    for the farmer's YES. If the field is genuinely fine, skip the action and say so.
 6. Then produce the diagnosis. Keep "what" and "why" to one short sentence each; the farmer reads this
    as a text message.
@@ -628,7 +628,8 @@ QUESTION_MODE = (
 )
 
 SUPERVISOR_READ_TOOLS = ["list_fields", "get_field_context"]
-SUPERVISOR_WRITE_TOOLS = ["create_work_order", "create_scout_pin", "request_photo"]
+# request_photo is off until photo intake exists (no upload page or vision step yet: it was a dead end).
+SUPERVISOR_WRITE_TOOLS = ["create_work_order", "create_scout_pin"]
 
 
 def build_supervisor(
