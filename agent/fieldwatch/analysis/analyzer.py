@@ -7,6 +7,7 @@ scene within 10 days of the same calendar date. Previous pass: the latest clear 
 """
 from __future__ import annotations
 
+import logging
 import math
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
@@ -22,6 +23,8 @@ from .layers import LayerProvider, build_layers
 from .loader import SceneLoader, StacLoader
 from .pivot import resolve_pivot
 from .writer import NullWriter, OverlayWriter
+
+log = logging.getLogger(__name__)
 
 LOOKBACK_DAYS = 30
 PREVIOUS_DAYS = 40
@@ -180,6 +183,19 @@ def _analyze(req: C.FieldAnalysisRequest, loader: SceneLoader, writer: OverlayWr
         "health": render.health(cur, inside),
         "mask": render.mask(cur, inside, core.region_masks),
     }
+    # The comparison images are extras: a failure drawing one must never turn a finished analysis into an error.
+    extras = {
+        "departure": (core.z is not None, lambda: render.departure(core.z, inside)),
+        "change": (core.change is not None, lambda: render.change(core.change, inside)),
+        "normal": (core.baseline is not None, lambda: render.normal(core.baseline, inside)),
+    }
+    for name, (available, draw) in extras.items():
+        if not available:
+            continue
+        try:
+            pngs[name] = draw()
+        except Exception:  # noqa: BLE001
+            log.exception("could not draw the %s overlay for %s", name, req.field.field_id)
     refs = {}
     for name, png in pngs.items():
         key = f"{prefix}{name}.png"
@@ -189,4 +205,21 @@ def _analyze(req: C.FieldAnalysisRequest, loader: SceneLoader, writer: OverlayWr
         field=req.field, scene_id=scene.scene_id, date=chosen.isoformat(), status=core.status,
         clear_fraction=round(cur.clear_fraction, 3), indices=core.indices, anomaly=core.anomaly,
         gates=core.gates, overlays=C.Overlays(**refs), analysis_key=prefix,
+        comparison=_comparison(chosen, previous, history, core, refs),
+    )
+
+
+def _comparison(chosen: date, previous: IndexStack | None, history: list[IndexStack], core, refs: dict):
+    """Dates and color scales behind the departure / change / normal overlays, for captions."""
+    return C.OverlayComparison(
+        scene_date=chosen.isoformat(),
+        previous_date=previous.date.isoformat() if previous is not None else None,
+        baseline_dates=sorted(h.date.isoformat() for h in history),
+        baseline_method=core.baseline_method, median_departure_ndvi=core.median_departure,
+        departure_scale=(C.OverlayScale(stat="z", vmin=-render.DEPARTURE_Z_RANGE, vmax=render.DEPARTURE_Z_RANGE,
+                                        unit="standard deviations from this field's normal")
+                         if "departure" in refs else None),
+        change_scale=(C.OverlayScale(stat="ndvi_diff", vmin=-render.CHANGE_NDVI_RANGE, vmax=render.CHANGE_NDVI_RANGE,
+                                     unit="NDVI change since the previous clear pass")
+                      if "change" in refs else None),
     )

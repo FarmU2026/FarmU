@@ -108,6 +108,8 @@ def decide_field(event: dict) -> dict:
         "status": result.status, "clear_fraction": result.clear_fraction, "max_score": max_score,
         "region_count": len(regions), "regions": [r.model_dump(mode="json") for r in regions],
         "overlays": result.overlays.model_dump(mode="json") if result.overlays else None,
+        # Dates and color scales behind the departure / change / normal overlays (captions); None on older rows.
+        "comparison": result.comparison.model_dump(mode="json") if result.comparison else None,
         "analysis_key": result.analysis_key, "emit": decision.emit, "reason": decision.reason,
         "anomaly_id": decision.anomaly_id, "open_watch_ids": request.open_watch_ids,
         # The analyzer reports its own failures as data (status "error" + error detail); keep the detail.
@@ -152,7 +154,7 @@ def record_error(event: dict) -> dict:
     log.error("field %s/%s failed on scene %s: %s", ref.farm_id, ref.field_id, scene["scene_id"], detail)
     _write_row(ref, scene, bool(event.get("replay")), {
         "status": "error", "clear_fraction": 0, "max_score": 0, "region_count": 0, "regions": [], "overlays": None,
-        "analysis_key": None, "emit": False, "reason": "error", "error": detail,
+        "comparison": None, "analysis_key": None, "emit": False, "reason": "error", "error": detail,
     })
     cm.emit(C.SceneAnalyzed(occurred_at=cm.iso(cm.now()), field=ref, scene_id=scene["scene_id"],
                             date=cm.scene_date(scene), status="error", max_score=0.0, region_count=0))
