@@ -1,6 +1,8 @@
 """Overlay writers. The core only knows this tiny protocol; S3 lives in `s3_writer.py`."""
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Protocol
 
@@ -26,3 +28,21 @@ class LocalWriter:
         path = self.root / key
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
+
+
+_scoped: ContextVar[OverlayWriter | None] = ContextVar("fieldwatch_overlay_writer", default=None)
+
+
+@contextmanager
+def overlay_writer(writer: OverlayWriter):
+    """Opt in to a writer for registry-path analyses run inside the `with` block (the edge picks it, e.g. the scene
+    pipeline's analyze Lambda). Anything outside such a block (Gateway tools, the agent, tests) gets NullWriter."""
+    token = _scoped.set(writer)
+    try:
+        yield writer
+    finally:
+        _scoped.reset(token)
+
+
+def current_writer() -> OverlayWriter:
+    return _scoped.get() or NullWriter()

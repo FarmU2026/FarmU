@@ -147,7 +147,9 @@ def _sample(name: str, model: type[BaseModel]) -> Callable:
 def analyze_field(**kwargs) -> C.FieldAnalysisResult:
     from .analysis import analyze  # lazy: rasterio and scipy load only when the tool runs
 
-    return analyze(C.FieldAnalysisRequest.model_validate(kwargs))
+    from .analysis.writer import current_writer  # NullWriter unless a caller scoped one (scene analyze Lambda)
+
+    return analyze(C.FieldAnalysisRequest.model_validate(kwargs), writer=current_writer())
 
 
 def get_index_history(**kwargs):
