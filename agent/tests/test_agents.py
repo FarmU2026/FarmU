@@ -242,7 +242,8 @@ def test_fast_path_skips_specialists_when_precomputed_evidence_is_decisive(harne
     result = harness(FAST_RUN, top=0.93, context=_ring_context())
     assert not {"imagery", "environment", "agronomy"} & set(harness.calls["roles"])
     (req,) = harness.calls["score"]
-    assert [e.weight_key for e in req.evidence] == ["ring_pattern_strong"]
+    assert [e.weight_key for e in req.evidence if e.direction == "supports"] == ["ring_pattern_strong"]
+    assert all(e.direction == "refutes" for e in req.evidence if e.weight_key != "ring_pattern_strong")
     assert harness.calls["impact"] and isinstance(result.structured_output, Diagnosis)
 
 
@@ -250,7 +251,9 @@ def test_specialists_run_when_the_first_score_is_not_decisive(harness):
     harness(FULL_RUN, top=0.7, context=_ring_context())
     assert {"imagery", "environment", "agronomy"} <= set(harness.calls["roles"])
     assert len(harness.calls["score"]) == 2  # precheck, then the full score
-    assert len(harness.calls["score"][1].evidence) == 4  # ring evidence deduplicated with imagery's
+    # ring evidence deduplicated with imagery's: ring + 3 specialist refutes + the pattern-absence refutes from precheck
+    ring = [e for e in harness.calls["score"][1].evidence if e.weight_key == "ring_pattern_strong"]
+    assert len(ring) == 1
 
 
 def test_specialist_tools_refuse_once_the_fast_path_is_decisive(monkeypatch):
@@ -273,8 +276,8 @@ def test_no_fast_path_without_precomputed_analysis(harness):
 def test_evidence_from_analysis_and_hail_watch():
     analysis = json.loads((FIXTURES / "field_analysis_result.json").read_text())
     items = agents.evidence_from_analysis(analysis, [{"type": "hail", "detail": {"max_hail_mm": 40}}])
-    assert [(i.hypothesis, i.weight_key) for i in items] == [("pivot_failure", "ring_pattern_strong"),
-                                                            ("hail", "hail_swath_overlap_high")]
+    supports = [(i.hypothesis, i.weight_key) for i in items if i.direction == "supports"]
+    assert supports == [("pivot_failure", "ring_pattern_strong"), ("hail", "hail_swath_overlap_high")]
     analysis["status"] = "too_cloudy"
     assert agents.evidence_from_analysis(analysis) == []
 
