@@ -17,6 +17,7 @@ import sys
 from aws_cdk import CfnOutput, Duration, Stack, Tags
 from aws_cdk import aws_bedrockagentcore as agentcore
 from aws_cdk import aws_iam as iam
+from aws_cdk import aws_ssm as ssm
 from constructs import Construct
 
 from .common import AGENT, geo_lambda
@@ -132,3 +133,9 @@ class Tools(Stack):
         CfnOutput(self, "GatewayUrl", value=self.gateway.attr_gateway_url, export_name="FieldWatch-Tools-GatewayUrl")
         CfnOutput(self, "GatewayArn", value=self.gateway.attr_gateway_arn, export_name="FieldWatch-Tools-GatewayArn")
         CfnOutput(self, "ToolsFunctionName", value=self.function.function_name)
+        # The Runtime agent reads this at startup (agent/app.py _SSM_ENV); without it every tool falls back to the
+        # local implementations, which can't read imagery, soil or hail inside the Runtime.
+        ssm.StringParameter(
+            self, "GatewayUrlParam", parameter_name="/fieldwatch/gateway-url", string_value=self.gateway.attr_gateway_url,
+            description="AgentCore Gateway MCP URL for the Runtime agent's tools",
+        )
