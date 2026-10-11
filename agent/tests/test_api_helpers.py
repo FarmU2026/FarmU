@@ -17,6 +17,7 @@ REPO = Path(__file__).resolve().parents[2]
 REGION = "us-west-2"
 BUCKET = "fw-test-bucket"
 LINK_KEY = "test-link-key-0123456789"
+TEST_FARM_ID = "4025550100"  # a pre-change (phone digit) id: old ids must keep working
 
 
 def data_plane_tables() -> list[tuple]:
@@ -65,8 +66,11 @@ def aws(monkeypatch):
               "FIELDWATCH_MIRROR_FN", "FIELDWATCH_NOTIFY_REPLY_FN"):
         monkeypatch.delenv(k, raising=False)
 
-    from cloud.api import _aws
+    from cloud.api import _aws, store
     from fieldwatch import links
+
+    # Production farm ids are random (interfaces.new_farm_id); the tests pin the first one so FARM is a constant.
+    monkeypatch.setattr(store, "new_farm_id", lambda: TEST_FARM_ID)
 
     with mock_aws():
         _aws.reset_clients()

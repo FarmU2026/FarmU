@@ -21,7 +21,7 @@ import hmac
 import json
 import os
 
-from fieldwatch.interfaces import Env
+from fieldwatch.interfaces import Env, Ssm
 
 from . import _aws, _reply
 from ._http import Request, Response, Router, log
@@ -52,7 +52,7 @@ def public_url(req: Request) -> str:
 
 
 def _param_name() -> str:
-    return os.getenv("FIELDWATCH_TWILIO_TOKEN_PARAM", "/fieldwatch/twilio-auth-token")
+    return os.getenv(Env.TWILIO_TOKEN_PARAM, Ssm.TWILIO_AUTH_TOKEN)
 
 
 def _forward(req: Request, fn: str) -> Response:

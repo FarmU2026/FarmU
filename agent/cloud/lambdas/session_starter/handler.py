@@ -25,6 +25,7 @@ from botocore.exceptions import ClientError
 from pydantic import ValidationError
 
 from fieldwatch import contracts as C
+from fieldwatch.interfaces import InvestigationRecord, Sources, Ssm, Tables
 
 log = logging.getLogger()
 log.setLevel(logging.INFO)
@@ -87,7 +88,7 @@ class Starter:
                 )
                 return self._start(req, anomaly_id=ev.anomaly_id, replay=ev.replay)
             if kind == "StartInvestigation":
-                if envelope.get("source") != "fieldwatch.api":
+                if envelope.get("source") != Sources.API:
                     return self._drop(kind, "source_not_allowed")
                 req = C.StartInvestigation.model_validate(detail)
                 return self._start(req, anomaly_id=req.anomaly.anomaly_id if req.anomaly else None)
@@ -112,12 +113,9 @@ class Starter:
     # ------------------------------------------------------------ start
     def _start(self, req: C.StartInvestigation, *, anomaly_id: str | None = None, replay: bool = False) -> dict:
         inv = req.investigation_id
-        item = {
-            "investigation_id": inv, "farm_id": req.farm_id, "field_id": req.field,
-            "status": "queued", "created_at": _now(), "updated_at": _now(), "replay": replay,
-        }
-        if anomaly_id:
-            item["anomaly_id"] = anomaly_id
+        item = InvestigationRecord(investigation_id=inv, farm_id=req.farm_id, field_id=req.field, status="queued",
+                                   created_at=_now(), updated_at=_now(), replay=replay,
+                                   anomaly_id=anomaly_id).to_item()
         try:
             self.table.put_item(Item=item, ConditionExpression="attribute_not_exists(investigation_id)")
         except ClientError as e:
@@ -242,10 +240,10 @@ def _default_starter() -> Starter:
         arn = os.getenv("FIELDWATCH_RUNTIME_ARN", "")
         if arn:
             return arn
-        param = os.getenv("FIELDWATCH_RUNTIME_ARN_PARAM", "/fieldwatch/runtime-arn")
+        param = os.getenv("FIELDWATCH_RUNTIME_ARN_PARAM", Ssm.RUNTIME_ARN)
         return boto3.client("ssm", region_name=region).get_parameter(Name=param)["Parameter"]["Value"]
 
-    table = boto3.resource("dynamodb", region_name=region).Table(os.getenv("FIELDWATCH_INVESTIGATIONS_TABLE", "fw-investigations"))
+    table = boto3.resource("dynamodb", region_name=region).Table(os.getenv("FIELDWATCH_INVESTIGATIONS_TABLE", Tables.INVESTIGATIONS))
     runtime = boto3.client("bedrock-agentcore", region_name=region,
                            config=Config(read_timeout=50, connect_timeout=5, retries={"max_attempts": 1}))
     return Starter(table, runtime, load_arn)

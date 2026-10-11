@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from fieldwatch import contracts as C
 from fieldwatch import links
-from fieldwatch.interfaces import OPEN_INVESTIGATION_STATUSES, Env
+from fieldwatch.interfaces import OPEN_INVESTIGATION_STATUSES, Env, Ssm
 
 from . import _auth, _aws, _jobs, _reply, store
 from ._http import ApiError, Request, Response, Router
@@ -34,7 +34,7 @@ REPLAY_GAP_S = 30
 
 
 def _passcode_param() -> str:
-    return os.getenv("FIELDWATCH_DASHBOARD_PASSCODE_PARAM", "/fieldwatch/dashboard-passcode")
+    return os.getenv(Env.DASHBOARD_PASSCODE_PARAM, Ssm.DASHBOARD_PASSCODE)
 
 
 class PasscodeIn(BaseModel):

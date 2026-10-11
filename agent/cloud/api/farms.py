@@ -13,11 +13,13 @@ Handler: cloud.api.farms.handler. No auth, like today's local app (see report: r
 from __future__ import annotations
 
 import os
+import re
 
 from pydantic import BaseModel, Field
 
 from fieldwatch import config
 from fieldwatch import contracts as C
+from fieldwatch import interfaces
 from fieldwatch.interfaces import Env
 
 from . import _aws, _jobs, _reply, store
@@ -51,33 +53,36 @@ def _crop(c: str) -> str:
 @router.route("POST", "/api/farms")
 def create_farm(req: Request):
     body: FarmIn = req.model(FarmIn)
-    farm_id = store.farm_id_for_phone(body.phone)
-    if len(farm_id) < 10:
+    if len(re.sub(r"\D", "", body.phone)) < 10:
         raise ApiError("INVALID_INPUT", "phone: enter a 10-digit phone number")
     for f in body.fields:
         if len(f.polygon) < 3 or any(len(p) != 2 for p in f.polygon):
             raise ApiError("INVALID_INPUT", f"field {f.name!r} needs at least 3 [lat, lon] points")
 
     now = _aws.now_iso()
-    person_id = f"per_{farm_id}"
     phone = store.e164(body.phone)
+    # Signing up again with the same phone finds the same farm (GSI by-phone); a new phone gets a random id.
+    existing = store.person_by_phone(phone)
+    if existing and existing.get("role") == "owner":
+        farm_id, person_id = existing["farm_id"], existing["person_id"]
+    else:
+        farm_id = store.new_farm_id()
+        person_id = store.owner_person_id(farm_id)
     farms = _aws.table("farms")
-    farms.put_item(Item=_aws.to_ddb({
-        "farm_id": farm_id, "item": "FARM", "name": f"{body.farmer}'s farm", "farmer_name": body.farmer,
-        "phone": phone, "owner_person_id": person_id, "time_zone": "America/Chicago",
-        "quiet_hours": {"start": "21:00", "end": "06:00"}, "muted": False, "created_at": now,
-    }))
-    farms.put_item(Item=_aws.to_ddb({
-        "farm_id": farm_id, "item": f"PERSON#{person_id}", "person_id": person_id, "name": body.farmer,
-        "phone_e164": phone, "role": "owner", "channel_pref": "sms", "opt_in_at": now, "opted_out": False,
-    }))
+    farms.put_item(Item=_aws.to_ddb(interfaces.FarmItem(
+        farm_id=farm_id, name=f"{body.farmer}'s farm", farmer_name=body.farmer, phone=phone,
+        owner_person_id=person_id, timezone="America/Chicago", quiet_hours={"start": "21:00", "end": "06:00"},
+        muted=False, created_at=now).to_item()))
+    farms.put_item(Item=_aws.to_ddb(interfaces.PersonItem(
+        farm_id=farm_id, item=interfaces.person_item_key(person_id), person_id=person_id, name=body.farmer,
+        phone_e164=phone, role="owner", channel_pref="sms", opt_in_at=now, opted_out=False).to_item()))
 
     # Re-signing up with the same phone replaces the field list (as the local app does).
     fields_tbl = _aws.table("fields")
     seen: set[str] = set()
     fields: list[dict] = []
     for f in body.fields:
-        base = f"fld_{farm_id}_{store.slug(f.name)}"
+        base = f"fld_{farm_id.removeprefix('farm_')}_{store.slug(f.name)}"
         fid, n = base, 2
         while fid in seen:
             fid, n = f"{base}-{n}", n + 1

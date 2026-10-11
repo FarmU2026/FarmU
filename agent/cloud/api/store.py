@@ -1,16 +1,19 @@
 """Reads and writes shared by the API route groups (fw-farms, fw-fields, fw-scene-analyses, ...).
 
-Item shapes written here (other lanes read them):
+Item shapes (the models live in fieldwatch.interfaces; other lanes read them):
 
-fw-farms  FARM               farm_id, item="FARM", name, farmer_name, phone, owner_person_id, time_zone,
-                             quiet_hours {start, end}, muted, created_at, last_checked?, context_build_id?
-fw-farms  PERSON#<person_id> farm_id, item, person_id, name, phone_e164 (GSI by-phone), role, channel_pref,
+fw-farms  FARM               interfaces.FarmItem: farm_id, item="FARM", name, farmer_name, phone, owner_person_id,
+                             timezone (IANA; notify's quiet hours), quiet_hours {start, end}, muted, created_at, ...
+fw-farms  PERSON#<person_id> interfaces.PersonItem: person_id, name, phone_e164 (GSI by-phone), role, channel_pref,
                              opt_in_at, opted_out
 fw-fields                    farm_id, field_id, name, crop, crop_current, acres, irrigated, irrigation,
                              polygon [[lon, lat], ...] (closed ring not required), geometry_key?, status
-fw-farms  THREAD#<at>#<id>   written by the projector (WS13): at, who (fieldwatch|farmer|agent), text, plus
-                             optional kind, field_id, investigation_id, sms {ok}. The API reads them in sort-key
+fw-farms  THREAD#<at>#<id>   interfaces.ThreadItem, written by the projector (WS13). The API reads them in sort-key
                              order and only writes one itself (the welcome) when no send Lambda is configured.
+
+Farm ids are `farm_` + a random, time-sortable token (interfaces.new_farm_id): never the phone number, which
+would leak into URLs and AppSync channel names. The owner's phone finds the farm again via GSI by-phone.
+Older farms keep their ids (any farm_id string is accepted).
 """
 from __future__ import annotations
 
@@ -20,6 +23,8 @@ import uuid
 from typing import Any
 
 from boto3.dynamodb.conditions import Key
+
+from fieldwatch import interfaces
 
 from . import _aws
 from ._http import ApiError
@@ -35,9 +40,12 @@ def slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-") or "field"
 
 
-def farm_id_for_phone(phone: str) -> str:
-    """Same rule as today's web app (sms.farm_id_for): last 10 digits of the phone."""
-    return re.sub(r"\D", "", phone)[-10:]
+def new_farm_id() -> str:
+    return interfaces.new_farm_id()
+
+
+def owner_person_id(farm_id: str) -> str:
+    return "per_" + farm_id.removeprefix("farm_")
 
 
 def e164(phone: str) -> str:
@@ -150,6 +158,7 @@ def thread(farm_id: str) -> list[dict]:
                            KeyConditionExpression=Key("farm_id").eq(farm_id) & Key("item").begins_with(THREAD_PREFIX))
     out = []
     for it in items[-THREAD_LIMIT:]:
+        interfaces.ThreadItem.from_item(it)  # the shared row shape; a malformed row fails loudly here
         entry = {k: v for k, v in it.items() if k not in ("farm_id", "item", "expires_at")}
         entry.setdefault("at", it["item"][len(THREAD_PREFIX):].split("#")[0])
         entry.setdefault("who", "fieldwatch")
@@ -159,11 +168,9 @@ def thread(farm_id: str) -> list[dict]:
 
 
 def put_thread_item(farm_id: str, who: str, text: str, **extra) -> None:
-    at = _aws.now_iso()
-    _aws.table("farms").put_item(Item=_aws.to_ddb({
-        "farm_id": farm_id, "item": f"{THREAD_PREFIX}{at}#{uuid.uuid4().hex[:8]}",
-        "at": at, "who": who, "text": text, **extra,
-    }))
+    row = interfaces.ThreadItem(farm_id=farm_id, id=uuid.uuid4().hex[:8], at=_aws.now_iso(), who=who, text=text,
+                                **extra)
+    _aws.table("farms").put_item(Item=_aws.to_ddb(row.to_item()))
 
 
 # ---------- scene analyses ----------

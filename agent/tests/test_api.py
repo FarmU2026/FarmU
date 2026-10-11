@@ -334,3 +334,20 @@ def test_lambda_event_with_route_key(aws):
     resp = farms.handler(event("GET", f"/api/farms/{FARM}", route_key="GET /api/farms/{farm_id}") | {
         "pathParameters": {"farm_id": FARM}}, None)
     assert resp["statusCode"] == 200 and json.loads(resp["body"])["farm_id"] == FARM
+
+
+# ---------- farm ids (no phone numbers in ids) ----------
+
+
+def test_new_farms_get_random_ids_and_the_phone_finds_them_again(aws, monkeypatch):
+    from cloud.api import store
+    from fieldwatch import interfaces
+
+    monkeypatch.setattr(store, "new_farm_id", interfaces.new_farm_id)  # undo the fixture's pinned id
+    _, first, _ = signup(farms, phone="(402) 555-0177")
+    fid = first["farm_id"]
+    assert fid.startswith("farm_") and "5550177" not in fid and "4025550177" not in json.dumps(first["fields"])
+    farm = aws.table("farms").get_item(Key={"farm_id": fid, "item": "FARM"})["Item"]
+    assert farm["timezone"] == "America/Chicago" and "time_zone" not in farm  # notify reads `timezone`
+    _, again, _ = signup(farms, phone="402-555-0177", fields=[{"name": "B", "polygon": NORTH_PIVOT_LATLON}])
+    assert again["farm_id"] == fid and [f["name"] for f in again["fields"]] == ["B"]
