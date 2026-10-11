@@ -16,6 +16,7 @@ from cloud.lambdas.context import adapters, finalize, geo_lookup, load_boundary,
 from cloud.lambdas.context.common import (BoundaryError, StageError, from_ddb, normalize_crop, to_ddb)
 from cloud.lambdas.context.geometry import normalize_polygon
 from fieldwatch import contracts as C
+from fieldwatch import interfaces
 
 FARM = "farm-1"
 FIELD = "north-pivot"
@@ -216,7 +217,8 @@ def test_stage_ownership_is_disjoint_and_matches_contract():
     assert set(owned) == flat  # disease_reports and baseline are in the contract now
 
 
-def test_stored_context_validates_against_the_contract():
+def test_stored_context_validates_against_the_contract(monkeypatch):
+    monkeypatch.setattr(interfaces, "build_baseline_fn", lambda: None)  # the module exists now; test the stub shape
     sample = json.loads((Path(__file__).resolve().parents[1] / "fixtures" / "contracts" / "field_context.json").read_text())
     stub = stages.STAGES["baseline"].compute({"field_id": "north-pivot", "boundary": {}})[0]
     C.FieldContext.model_validate({**sample, **stub})
@@ -301,7 +303,8 @@ def test_baseline_uses_waiting_analysis_module_when_present(aws, monkeypatch):
     assert get_context(aws)["baseline"]["seasons"] == [2023, 2024, 2025]
 
 
-def test_baseline_stub_when_analysis_module_absent(aws):
+def test_baseline_stub_when_analysis_module_absent(aws, monkeypatch):
+    monkeypatch.setattr(interfaces, "build_baseline_fn", lambda: None)  # simulate the module not being importable
     out = stages.baseline_handler(EVENT)
     base = get_context(aws)["baseline"]
     assert out["stub"] is True and base["stub"] is True and base["key"] is None and base["seasons"] == []
