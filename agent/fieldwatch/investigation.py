@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 
 from strands.session import FileSessionManager
 
-from . import config, interfaces
+from . import config, interfaces, memory
 from . import contracts as C
 from .agents import build_supervisor
 from .config import SESSIONS
@@ -106,12 +106,14 @@ def _to_step(result, timeline: ToolTimeline, approved: bool | None = None) -> St
     return Step(status="done", text=text, diagnosis=diag, timeline=timeline.events)
 
 
-def start(investigation_id: str, field_name: str, emit=print_event) -> Step:
-    """Kick off an investigation. Usually ends paused on an approval interrupt."""
+def start(investigation_id: str, field_name: str, emit=print_event, context: str = "") -> Step:
+    """Kick off an investigation. Usually ends paused on an approval interrupt.
+    `context` is the recalled-memory block (memory.format_recall), placed before the task."""
     timeline = ToolTimeline(emit)
     agent = _build(timeline, session_manager(investigation_id))
+    task = f"Investigate the field called '{field_name}'."
     result = agent(
-        f"Investigate the field called '{field_name}'.",
+        f"{context}\n\n{task}" if context else task,
         limits=LIMITS,
         structured_output_model=Diagnosis,
     )
@@ -345,7 +347,7 @@ def run_request(req: C.StartInvestigation | C.ResumeInvestigation, recorder: Rec
             if resuming:
                 step = reply(inv, req.interrupt_id, req.text, emit=rec.on_hook_event)
             else:
-                step = start(inv, req.field, emit=rec.on_hook_event)
+                step = start(inv, req.field, emit=rec.on_hook_event, context=_recall_context(rec, req))
     except Exception as exc:
         log.exception("investigation %s failed", inv)
         # a failed resume keeps its interrupt, so the starter can try the same answer again
@@ -373,7 +375,38 @@ def run_request(req: C.StartInvestigation | C.ResumeInvestigation, recorder: Rec
         if diag:
             rec.concluded(diag, message_id=sent.message_id if sent else None)
         rec.progress("supervisor", "done", "Investigation finished")
+    _remember_step(rec, req, step)
     return out
+
+
+def _recall_context(rec: Recorder, req: C.StartInvestigation) -> str:
+    """Long-term memory for a new investigation: the prompt block, with a progress step. "" when off or empty."""
+    try:
+        notes = memory.recall(rec.farm_id, req.field, memory.describe_anomaly(req.anomaly))
+        if notes:
+            rec.progress("supervisor", "plan", f"Recalled {len(notes)} note{'s' if len(notes) != 1 else ''} from past investigations on this farm")
+        return memory.format_recall(notes)
+    except Exception:
+        log.exception("memory recall failed for %s", rec.investigation_id)
+        return ""
+
+
+def _remember_step(rec: Recorder, req: C.StartInvestigation | C.ResumeInvestigation, step: Step) -> None:
+    """Write what just happened to AgentCore Memory (question asked, conclusion, or the farmer's verdict). Never raises."""
+    if not memory.memory_id():
+        return
+    try:
+        diag, today, message = step.diagnosis, _now()[:10], step.text
+        condition = (diag.condition or infer_condition(diag)) if diag else "unknown"
+        if isinstance(req, C.ResumeInvestigation):
+            turns = memory.verdict_turns(req.text, diag, condition, message)
+        else:
+            trigger = memory.describe_anomaly(req.anomaly)
+            turns = (memory.conclusion_turns(req.field, trigger, today, diag, condition, message) if diag
+                     else memory.question_turns(req.field, trigger, today, message))
+        memory.remember(rec.farm_id, rec.investigation_id, turns)
+    except Exception:
+        log.exception("memory write failed for %s", rec.investigation_id)
 
 
 def deliver(rec: Recorder, step: Step) -> C.SendMessageResult | None:

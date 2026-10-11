@@ -115,23 +115,37 @@ set, sessions go to S3 `sessions/`; otherwise to local files (lost when the micr
 
 `agentcore.json` lists `policies/runtime-access.json` under `additionalPolicies`: the CLI attaches it as an inline policy
 to the Runtime execution role it creates. It grants Bedrock invoke, `bedrock-agentcore:InvokeGateway`, `events:PutEvents`
-on the `fieldwatch` bus, read/write on `fw-investigations`, the `sessions/` prefix of the data-plane bucket
+on the `fieldwatch` bus, read/write on `fw-investigations`, AgentCore Memory events and records (`memory/*`), the `sessions/` prefix of the data-plane bucket
 (`fieldwatch-dataplane-bucket*`), and three SSM parameters. Account IDs are wildcards so the file is the same in every
-account. To add more (Memory, other tables), edit that file and redeploy. The `fieldwatch-boundary` permits all of it.
+account. To add more (other tables), edit that file and redeploy. The `fieldwatch-boundary` permits all of it.
 
 ## Memory (episodic) and tracing
 
 Tracing is on (`instrumentation.enableOtel`, ADOT bundled via `aws-opentelemetry-distro`). The first invoke switches the
 account to CloudWatch Transaction Search (finding 37): set span indexing to a deliberate percentage.
 
-AgentCore Memory is **not added yet** (D9 cut order keeps S3 sessions). To add it:
+### Long-term memory (AgentCore Memory)
 
-1. `agentcore add memory --name FieldWatchMemory --strategies EPISODIC,USER_PREFERENCE,SEMANTIC --expiry 90 < /dev/null`
-   (EPISODIC needs `reflectionNamespaceTemplates`, e.g. `/fieldwatch/farm/{actorId}/episodes`, in `agentcore.json`).
-2. Add `bedrock-agentcore:CreateEvent`, `ListEvents`, `RetrieveMemoryRecords` on the memory ARN to `runtime-access.json`.
-3. In `investigation.py`, write one event per finished investigation (`actorId = farm_id`, `sessionId = investigation_id`) and
-   retrieve the top episodes for the same field at start; keep S3 for the interrupt state, since the session manager must
-   stay S3 (Memory is not the system of record, specs "Memory mapping").
+`agentcore.json` declares the memory `fieldwatch_memory` (EPISODIC + SEMANTIC strategies, 90-day event expiry). The CLI
+creates it on deploy and injects its id into the Runtime as `MEMORY_FIELDWATCH_MEMORY_ID`; with that variable unset
+(local harness, tests) `fieldwatch/memory.py` does nothing. The S3 session manager still holds the paused agent and its
+interrupts; Memory only adds recall, and the exact records stay in DynamoDB.
+
+- **Writes** (`actorId` = the farm, `sessionId` = the investigation): one event when an investigation pauses on a question
+  (what triggered it, what we asked), one when it concludes (diagnosis, how sure the scorer is, the message sent), and one
+  when the farmer answers (their words, approved or declined). A correction such as "that wasn't hail, it was drift" is
+  just a farmer reply, so it lands in the same session.
+- **Reads**: when a new investigation starts, `recall()` searches `/episodes/{farm}` and `/users/{farm}/facts` with the field
+  and the anomaly and puts the top notes in the supervisor's first prompt, labeled as data, not instructions. The timeline
+  shows "Recalled N notes from past investigations on this farm".
+- **Extraction is asynchronous.** The service turns events into episodes and facts in the background, usually a few
+  minutes after the event (episodes finish when a session goes quiet). An investigation that just finished is not recalled
+  instantly, and a fresh memory returns nothing until real runs have been through it. There is no seeding script on purpose:
+  demo recall must come from real earlier runs.
+- **Inspect**: `aws bedrock-agentcore list-events --memory-id <id> --actor-id <farm> --session-id <investigation>
+  --include-payloads`, and `aws bedrock-agentcore list-memory-records --memory-id <id> --namespace /episodes/<farm>`
+  (also `/users/<farm>/facts`). Memory failures are logged as warnings (`memory recall failed` / `memory write failed`)
+  and never affect the investigation. The role needs the `LongTermMemory` statement in `runtime-access.json`.
 
 ## Known gaps
 

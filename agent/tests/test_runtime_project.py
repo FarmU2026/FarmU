@@ -36,7 +36,9 @@ def test_runtime_deploys_the_real_agent(spec):
     (rt,) = spec["runtimes"]
     assert (rt["build"], rt["protocol"], rt["entrypoint"], rt["runtimeVersion"]) == ("CodeZip", "HTTP", "app.py", "PYTHON_3_12")
     assert rt["codeLocation"] == "app/fieldwatch_agent/" and rt["networkMode"] == "PUBLIC"
-    assert spec["memories"] == [] and spec["agentCoreGateways"] == []
+    assert spec["agentCoreGateways"] == []
+    (mem,) = spec["memories"]
+    assert mem["name"] == "fieldwatch_memory" and {s["type"] for s in mem["strategies"]} == {"EPISODIC", "SEMANTIC"}
 
 
 def test_tags_and_tracing(spec):
@@ -80,6 +82,15 @@ def test_runtime_role_policy_covers_what_the_agent_does(spec):
         if "table/fw-farms" in json.dumps(stmt["Resource"]):
             assert set(stmt["Action"]) <= {"dynamodb:GetItem", "dynamodb:Query"}, stmt
     assert "function:fw-notify-send" in resources and "lambda:InvokeFunction" in actions
+
+
+def test_runtime_role_can_use_long_term_memory(spec):
+    doc = json.loads((CODE / spec["runtimes"][0]["additionalPolicies"][0]).read_text())
+    (stmt,) = [s for s in doc["Statement"] if s["Sid"] == "LongTermMemory"]
+    assert {"bedrock-agentcore:CreateEvent", "bedrock-agentcore:RetrieveMemoryRecords"} <= set(stmt["Action"])
+    assert stmt["Effect"] == "Allow" and stmt["Resource"] == "arn:aws:bedrock-agentcore:us-west-2:*:memory/*"
+    # recall and events only: nothing that creates, deletes or reconfigures memory resources
+    assert not {a for a in stmt["Action"] if re.search(r"Create(?!Event)|Delete|Update|Batch", a)}
 
 
 def test_stage_copies_the_real_source_without_duplicating_it(tmp_path):

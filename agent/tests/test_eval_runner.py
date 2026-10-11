@@ -272,7 +272,7 @@ def test_default_investigate_records_in_memory_through_run_request(monkeypatch):
     diag = Diagnosis(field_name="north pivot", what="Outer edge is dry", where="outer span", why="pivot nozzle likely out",
                      dollars_low=9000, dollars_high=14000, how_sure="pretty sure", recommended_action="repair_work_order",
                      action_detail="check the end tower", condition="pivot_failure", affected_acres=12.0)
-    monkeypatch.setattr(inv, "start", lambda i, f, emit=None: inv.Step("waiting_for_farmer", "Send a ticket? YES / NO",
+    monkeypatch.setattr(inv, "start", lambda i, f, emit=None, context="": inv.Step("waiting_for_farmer", "Send a ticket? YES / NO",
                                                                          interrupt_id="int-9"))
     monkeypatch.setattr(inv, "reply", lambda i, it, t, emit=None: inv.Step("done", diag.to_text(True), diagnosis=diag))
     monkeypatch.setattr(inv, "deliver", lambda rec, step: SimpleNamespace(message_id="m1") if step.text else None)

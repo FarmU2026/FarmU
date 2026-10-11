@@ -16,33 +16,84 @@
       "entrypoint": "app.py",
       "codeLocation": "app/fieldwatch_agent/",
       "runtimeVersion": "PYTHON_3_12",
+      "envVars": [
+        {
+          "name": "FIELDWATCH_SSM_BOOTSTRAP",
+          "value": "1"
+        },
+        {
+          "name": "FIELDWATCH_PROVIDER",
+          "value": "bedrock"
+        },
+        {
+          "name": "FIELDWATCH_MODEL",
+          "value": "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        },
+        {
+          "name": "FIELDWATCH_TOOLS_BACKEND",
+          "value": "gateway"
+        },
+        {
+          "name": "FIELDWATCH_EVENT_BUS",
+          "value": "fieldwatch"
+        },
+        {
+          "name": "FIELDWATCH_TABLE_PREFIX",
+          "value": "fw-"
+        },
+        {
+          "name": "FIELDWATCH_APPROVALS_BACKEND",
+          "value": "dynamo"
+        },
+        {
+          "name": "FIELDWATCH_DATA_BACKEND",
+          "value": "dynamo"
+        },
+        {
+          "name": "FIELDWATCH_SEND_FN",
+          "value": "fw-notify-send"
+        }
+      ],
       "networkMode": "PUBLIC",
-      "protocol": "HTTP",
       "instrumentation": {
         "enableOtel": true
       },
-      "envVars": [
-        { "name": "FIELDWATCH_SSM_BOOTSTRAP", "value": "1" },
-        { "name": "FIELDWATCH_PROVIDER", "value": "bedrock" },
-        { "name": "FIELDWATCH_MODEL", "value": "us.anthropic.claude-haiku-4-5-20251001-v1:0" },
-        { "name": "FIELDWATCH_TOOLS_BACKEND", "value": "gateway" },
-        { "name": "FIELDWATCH_EVENT_BUS", "value": "fieldwatch" },
-        { "name": "FIELDWATCH_TABLE_PREFIX", "value": "fw-" },
-        { "name": "FIELDWATCH_APPROVALS_BACKEND", "value": "dynamo" },
-        { "name": "FIELDWATCH_DATA_BACKEND", "value": "dynamo" },
-        { "name": "FIELDWATCH_SEND_FN", "value": "fw-notify-send" }
+      "protocol": "HTTP",
+      "additionalPolicies": [
+        "policies/runtime-access.json"
       ],
-      "additionalPolicies": ["policies/runtime-access.json"],
+      "tags": {
+        "project": "fieldwatch"
+      },
       "lifecycleConfiguration": {
         "idleRuntimeSessionTimeout": 1800,
         "maxLifetime": 28800
-      },
-      "tags": {
-        "project": "fieldwatch"
       }
     }
   ],
-  "memories": [],
+  "memories": [
+    {
+      "name": "fieldwatch_memory",
+      "eventExpiryDuration": 90,
+      "strategies": [
+        {
+          "type": "EPISODIC",
+          "namespaceTemplates": [
+            "/episodes/{actorId}/{sessionId}"
+          ],
+          "reflectionNamespaceTemplates": [
+            "/episodes/{actorId}"
+          ]
+        },
+        {
+          "type": "SEMANTIC",
+          "namespaceTemplates": [
+            "/users/{actorId}/facts"
+          ]
+        }
+      ]
+    }
+  ],
   "knowledgeBases": [],
   "credentials": [],
   "evaluators": [],
