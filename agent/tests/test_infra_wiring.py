@@ -60,7 +60,7 @@ def test_monitoring_alarms_on_every_dlq_and_publishes_to_an_unsubscribed_topic(a
     t = _template(app, "FieldWatch-Monitoring")
     alarms = t.find_resources("AWS::CloudWatch::Alarm")
     dlq = [a for a in alarms.values() if a["Properties"]["MetricName"] == "ApproximateNumberOfMessagesVisible"]
-    assert len(dlq) == 4
+    assert len(dlq) == 5  # scenes, session starter, notifications, projector, hail
     assert any(a["Properties"]["MetricName"] == "Errors" for a in alarms.values())
     assert any(a["Properties"]["MetricName"] == "ExecutionsFailed" for a in alarms.values())
     t.resource_count_is("AWS::SNS::Topic", 1)
@@ -108,3 +108,15 @@ def test_total_reserved_concurrency_stays_well_under_the_account_limit(app):
     total = sum(v or 0 for s in app.node.children if hasattr(s, "template_options")
                 for v in _reserved(app, s.node.id).values())
     assert 0 < total < 100
+
+
+def test_monitoring_alarms_on_the_hazards_and_notification_lambdas(app):
+    """Kurt's functions: hail filter + drought poller (hazards), send + reply + mirror (notifications)."""
+    t = _template(app, "FieldWatch-Monitoring")
+    alarms = t.find_resources("AWS::CloudWatch::Alarm")
+    errors = [lid for lid, a in alarms.items() if a["Properties"]["MetricName"] == "Errors"]
+    for name in ("HailFilter", "DroughtPoller", "NotifySend", "NotifyReply", "NotifyMirror"):
+        (lid,) = [e for e in errors if e.startswith(name + "Errors")]
+        props = alarms[lid]["Properties"]
+        assert props["Threshold"] == 0 and props["Period"] == 300 and props["AlarmActions"], name
+    assert any(lid.startswith("HailDlqNotEmpty") for lid in alarms)
