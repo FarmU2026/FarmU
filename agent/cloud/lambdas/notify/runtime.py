@@ -60,11 +60,11 @@ def twilio_token():
     return parameter(os.getenv('FIELDWATCH_TWILIO_TOKEN_PARAM', '/fieldwatch/twilio-auth-token'))
 
 
-@lru_cache(maxsize=1)
-def service():
+@lru_cache(maxsize=2)
+def service(*, mirror=False):
     import boto3
     provider_name = os.getenv('FIELDWATCH_SMS', 'twilio').lower()
-    enabled = os.getenv('SMS_ENABLED', 'false').lower() == 'true'
+    enabled = not mirror and os.getenv('SMS_ENABLED', 'false').lower() == 'true'
     provider = MirrorProvider()
     if enabled:
         if provider_name == 'twilio':
