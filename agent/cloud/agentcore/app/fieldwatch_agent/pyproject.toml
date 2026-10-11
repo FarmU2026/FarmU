@@ -20,6 +20,8 @@ dependencies = [
     "pydantic >= 2",
     "python-dotenv >= 1",
     "requests >= 2.31",
+    # fieldwatch.context (imported by the registry at startup) needs shapely; without it the Runtime never boots.
+    "shapely >= 2",
     "strands-agents >= 1.15.0",
 ]
 
