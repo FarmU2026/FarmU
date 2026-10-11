@@ -82,6 +82,8 @@ def test_api_stage_is_throttled_with_tighter_limits_on_costly_routes(app):
     # every throttled key is a real route of the API (an unknown key would fail the deploy)
     routes = {r["Properties"]["RouteKey"] for r in t.find_resources("AWS::ApiGatewayV2::Route").values()}
     assert set(rs) <= routes
+    # ...and exists before the stage updates: otherwise adding a throttled route fails the deploy and its rollback
+    assert set(t.find_resources("AWS::ApiGatewayV2::Route")) <= set(stage.get("DependsOn", []))
 
 
 def _reserved(app, stack):
