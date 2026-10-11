@@ -279,7 +279,7 @@ details summary { cursor: pointer; min-height: 32px; }
 .facts > div { display: grid; grid-template-columns: 148px minmax(0, 1fr); gap: 4px 16px; padding: 8px 0; }
 .facts dt { font-size: 15px; line-height: 27px; font-weight: 500; color: var(--muted); }
 .facts dd { margin: 0; }
-.st-waiting { color: var(--warn); } .st-approved { color: var(--accent); } .st-declined { color: var(--muted); }
+.st-waiting { color: var(--warn); } .st-approved, .st-done { color: var(--accent); } .st-declined, .st-expired { color: var(--muted); }
 .links.pl { margin-top: 4px; }
 .calm { list-style: none; margin: 8px 0 0; padding: 0; }
 .calm li { padding: 12px 0; border-top: 1px solid var(--line); }
@@ -298,3 +298,25 @@ details summary { cursor: pointer; min-height: 32px; }
   .facts dt { line-height: 22px; }
 }
 @media (max-width: 420px) { .editgrid { grid-template-columns: 1fr; } }
+
+/* ---------- "What FieldWatch sees": a segmented control over one picture ---------- */
+.see { margin-top: 16px; max-width: 620px; }
+.see-h { font-size: 15px; line-height: 22px; font-weight: 600; color: var(--muted); margin: 0 0 8px; }
+.seg { display: flex; flex-wrap: wrap; gap: 8px; }
+.seg button { flex: 1 1 auto; min-height: 48px; padding: 8px 12px; border: 2px solid var(--line); border-radius: 8px; background: transparent; font-size: 16px; line-height: 22px; font-weight: 600; color: var(--ink); }
+.seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.seefig { margin: 12px 0 0; }
+.seeimg { position: relative; line-height: 0; background: var(--line); min-height: 160px; width: fit-content; max-width: 100%; }
+.seeimg img { display: block; width: auto; max-width: 100%; height: auto; max-height: 440px; image-rendering: pixelated; }
+.seeimg img.over { position: absolute; inset: 0; width: 100%; height: 100%; max-height: none; }
+.seeimg.fail { min-height: 0; width: 100%; }
+.seeimg.fail img { display: none; }
+.seeimg.fail::after { content: "No picture for this view yet."; display: block; padding: 48px 16px; text-align: center; font-size: 15px; line-height: 22px; color: var(--muted); }
+.seefig figcaption { font-size: 15px; line-height: 22px; color: var(--ink); margin-top: 8px; }
+.scale { margin-top: 12px; }
+.scale i { display: block; height: 12px; border-radius: 6px; box-shadow: 0 0 0 1px rgba(0,0,0,.25); }
+.sc-div { background: linear-gradient(90deg, #A50F15, #EF7846, #F2F0E8, #6EBEC8, #2152A8); }
+.sc-health { background: linear-gradient(90deg, #DC3C28, #28DC28); }
+.scale .ends { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; font-size: 14px; line-height: 20px; font-weight: 500; color: var(--muted); }
+.scale + .meta { margin-top: 4px; }
+.see-note { margin-top: 16px; }
