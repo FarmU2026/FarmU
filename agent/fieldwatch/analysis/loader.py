@@ -20,6 +20,7 @@ STAC_URL = "https://earth-search.aws.element84.com/v1"
 COLLECTION = "sentinel-2-c1-l2a"
 BAND_ASSETS = {"red": "red", "green": "green", "blue": "blue", "nir": "nir",
                "rededge": "rededge1", "swir": "swir16", "scl": "scl"}
+STAC_TO_BAND = {stac: band for band, stac in BAND_ASSETS.items()}
 DEFAULT_SCALE, DEFAULT_OFFSET = 0.0001, -0.1
 
 
@@ -96,8 +97,11 @@ class StacLoader:
         scaling = self._scaling.get(scene.scene_id, {})
         jobs = {}
         with ThreadPoolExecutor(self.max_workers) as pool:
-            for band, href in scene.assets.items():
-                if band not in BAND_ASSETS:
+            for name, href in scene.assets.items():
+                # Our own search keys assets by band ("rededge"); scenes pinned by the scene pipeline arrive
+                # keyed by STAC asset name ("rededge1"). Accept both.
+                band = name if name in BAND_ASSETS else STAC_TO_BAND.get(name)
+                if band is None or band in jobs:
                     continue
                 sc, off = (None, None) if band == "scl" else scaling.get(band, (DEFAULT_SCALE, DEFAULT_OFFSET))
                 jobs[band] = pool.submit(_read_band, href, grid, sc, off)
