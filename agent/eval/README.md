@@ -107,3 +107,27 @@ Replies the agent never asks for are not sent; the result notes them.
 6. `python -m eval.runner --scenario <scenario-id>`; a bad file is reported by name.
 
 `demo-fixture-pivot.json` is the structural example. It uses the placeholder `demo_farm.json`, not a real scene.
+
+## Finding the before/after scenes (`find_scenes`)
+
+Given a field and an event date, list the clear Sentinel-2 dates and pick the nearest clear scene before and after.
+"Clear" is the analyzer's own test (cloud/shadow mask inside the 10 m-buffered field), so a listed date is one
+`analyze()` accepts. Same-pass tiles are deduplicated. Public data only, no AWS. Run from `agent/`:
+
+```
+python -m eval.find_scenes --point 42.164,-96.526 --acres 80 --year 2025          # all clear dates Apr-Oct
+python -m eval.find_scenes --geojson field.json --event-date 2025-06-20 --window-days 45
+python -m eval.find_scenes --bbox=-96.548,42.152,-96.532,42.168 --event-date 2025-06-20 \
+    --analyze --out-dir scenes_out --field-id my-field --scenario-out draft.json
+```
+
+- Input: `--geojson` (Polygon, Feature or FeatureCollection), `--bbox W,S,E,N`, or `--point lat,lon --acres N`.
+- Range: `--event-date` (brackets it, +/- `--window-days`, default 45), `--year` (Apr 1 to Oct 31), or `--start/--end`.
+  `--min-clear` (default 0.8) sets the threshold; `--all` also lists cloudy dates.
+- `--analyze` runs `analyze()` on the after-date (or the latest clear date) and prints regions with ring/wedge/edge/
+  stripe scores and low-spot and sandy overlap. No layers are passed, so overlaps read 0.00 until layers are wired in.
+  Overlay PNGs (true color, health, mask) land under `--out-dir/analysis/<field-id>/<date>/s2/`.
+- `--scenario-out` writes a draft `contracts.Scenario` (validated) with `as_of` = the after-date. Set `field_id`,
+  `farm_fixture` and `expected.top_condition` / `action_type` by hand, then move it into `scenarios/`.
+- Negative longitudes: the CLI handles `--bbox -96.5,...` and `--point -...` itself; `--bbox=` also works.
+- Code: `fieldwatch/analysis/scenes.py` (`find_clear_scenes`, `bracket_event`, `draft_scenario`).
