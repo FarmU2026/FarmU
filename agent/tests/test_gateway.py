@@ -19,6 +19,19 @@ from fieldwatch import config, registry, toolset
 FAKE_CREDS = Credentials("AKIDEXAMPLE", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY", "FwoGZXIvYXdzEXAMPLETOKEN")
 
 
+@pytest.fixture(autouse=True)
+def offline_hazard_tool(monkeypatch):
+    """Gateway tests exercise dispatch independently of the live NOAA adapter."""
+    from fieldwatch.contracts import HailReport
+    def fake_hail(field_id, start, end):
+        return HailReport(field_id=field_id,start=start,end=end,max_hail_mm=0,pct_area_over_threshold=0)
+    spec = replace(registry.BY_NAME['get_hail'], fn=fake_hail)
+    monkeypatch.setitem(H.BY_NAME,'get_hail',spec)
+    patched = [spec if t.name=='get_hail' else t for t in registry.TOOLS]
+    monkeypatch.setattr(registry,'TOOLS',patched)
+    monkeypatch.setattr(toolset,'TOOLS',patched)
+
+
 def ctx(tool: str, target: str = "fw") -> SimpleNamespace:
     return SimpleNamespace(client_context=SimpleNamespace(custom={"bedrockAgentCoreToolName": f"{target}___{tool}"}))
 

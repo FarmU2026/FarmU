@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import actions as A
 from . import contracts as C
 from . import tools as T
+from . import hazards as H
 from .config import FIXTURES
 
 Access = Literal["read", "write"]
@@ -126,9 +127,9 @@ TOOLS: list[ToolSpec] = [
              C.FieldAnalysisRequest, _sample("field_analysis_result", C.FieldAnalysisResult),
              output_model=C.FieldAnalysisResult, workstream=1, stub=True),
     ToolSpec("get_hail", "Max radar hail size (mm) over a field for a date range, plus nearby ground reports.", "read",
-             FieldRangeIn, _sample("hail_report", C.HailReport), output_model=C.HailReport, workstream=3, stub=True),
+             FieldRangeIn, H.get_hail, output_model=C.HailReport, workstream=3),
     ToolSpec("get_drought", "US Drought Monitor category for a county as of a date.", "read",
-             DroughtIn, _sample("drought_status", C.DroughtStatus), output_model=C.DroughtStatus, workstream=3, stub=True),
+             DroughtIn, H.get_drought, output_model=C.DroughtStatus, workstream=3),
     ToolSpec("get_soil_profile", "Soil map units for a field from NRCS Soil Data Access.", "read",
              FieldIdIn, _sample("soil_profile", C.SoilProfile), output_model=C.SoilProfile, workstream=4, stub=True),
     ToolSpec("get_field_context", "Everything static about a field: soil, terrain, crop history, neighbors, economics.",
