@@ -197,8 +197,18 @@ class TestSceneFilter:
         assert scene_filter.process_message(body) == "started"
         assert scene_filter.process_message(body) == "skipped:duplicate"
         assert len(aws.sfn.started) == 1
-        row = cm.table("idempotency").get_item(Key={"key": f"scene#{SCENE_ID}"})["Item"]
+        row = cm.table("idempotency").get_item(Key={"key": f"scene#{SCENE_ID}#field#{FIELD}"})["Item"]
         assert row["replay"] is False and int(row["expires_at"]) > datetime.now(timezone.utc).timestamp()
+
+    def test_a_field_added_after_the_scene_still_gets_it(self, aws):
+        register_field()
+        body = json.dumps(stac_item())
+        assert scene_filter.process_message(body) == "started"
+        register_field(field_id="late-field")   # e.g. the farmer drew another field on the same tile
+        assert scene_filter.process_message(body) == "started"
+        assert scene_filter.process_message(body) == "skipped:duplicate"
+        second = aws.sfn.started[1]
+        assert [f["field_id"] for f in json.loads(second["input"])["fields"]] == ["late-field"]
 
     def test_sns_envelope_is_unwrapped(self, aws):
         register_field()
