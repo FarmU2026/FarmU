@@ -5,9 +5,11 @@ How the remaining work is split so three people and many Claude Code agents can 
 ## How this works
 
 - **Contracts first.** Everything that crosses a workstream boundary is a model in `agent/fieldwatch/contracts.py`, with a sample in `agent/fixtures/contracts/`. Build against the samples; don't wait for other lanes.
+- **Interfaces are the only way across.** To call another lane, import from `agent/fieldwatch/interfaces.py`: its Protocols and loaders (`notify()`, `approvals()`, `actions()`, `analysis()`, `toolset()`), `FieldwatchError`, `EVENT_REGISTRY` + `publish_event`, shared table rows (`FarmItem`, `PersonItem`, `ThreadItem`, `InvestigationRecord`, ...) and the names of tables, SSM parameters, env vars, Lambda functions and event sources. If what you need isn't there, propose it in a separate small PR. Never guess another lane's names; never call `put_events` yourself. When you expose something new for other lanes, add it there in the same small PR.
 - **The registry is the joint.** `agent/fieldwatch/registry.py` lists every agent tool. Stub entries return contract samples; a workstream replaces its stub's `fn`. The Gateway (WS6) generates its Lambda tools from the same list.
 - **Own your folders** (table below and `.github/CODEOWNERS`). Shared files have one owner; ask, or open a tiny PR.
-- **Data access:** use boto3 against the `fw-` tables, bucket and `fieldwatch` bus directly, with names from `fieldwatch/config.py`. Keys and indexes: `infra/stacks/data_plane.py`.
+- **Data access:** use boto3 against the `fw-` tables and bucket directly, with names from `fieldwatch.interfaces` (`Tables`, `table_name()`) and rows shaped by its row models; events go on the `fieldwatch` bus only through `interfaces.publish_event`. Keys and indexes: `infra/stacks/data_plane.py`.
+- **Infra wiring:** stacks get other stacks as objects in `infra/app.py` (e.g. `Api(..., scenes=scenes, notifications=notifications)`), not `-c` strings; `-c` values remain optional overrides.
 - **One branch per workstream**, short-lived, merged to `main` often. CI (offline tests, `cdk synth`, secret scan) must stay green.
 - **One Claude Code session per workstream** in its own git worktree:
   ```powershell
@@ -39,7 +41,7 @@ How the remaining work is split so three people and many Claude Code agents can 
 | 16 | Knowledge base | later | `data-prep/corpus.py`, `infra/stacks/knowledge.py` | T25 |
 | 17 | Photo intake | later | `agent/cloud/lambdas/intake/`, `infra/stacks/intake.py` | T31 |
 
-Shared files: `contracts.py`, `fixtures/contracts/`, `registry.py`, `config.py`, `infra/app.py`, `.github/` are Caleb's (small PRs welcome). `agent/web/` (the FastAPI dev harness) is frozen; the UI moves to `web/` in WS14.
+Shared files: `contracts.py`, `interfaces.py`, `fixtures/contracts/`, `registry.py`, `config.py`, `infra/app.py`, `.github/` are Caleb's (small PRs welcome). `agent/web/` (the FastAPI dev harness) is frozen; the UI moves to `web/` in WS14.
 
 ## Goals
 
@@ -110,4 +112,4 @@ Write your own checks from the goal first (Build Plan "the loop for every ticket
 
 ## Prompt template (paste into the workstream's Claude Code session)
 
-> You are working on FieldWatch (repo FarmU), workstream **N: <name>**. Read `CLAUDE.md`, `docs/decisions.md`, `docs/spike-findings.md`, and the plan sections listed for workstream N in `docs/workstreams.md` (plan docs are in `docs/`). Decisions and spike findings override the plan docs. Build against `agent/fieldwatch/contracts.py` and the samples in `agent/fixtures/contracts/`; do not change contracts. Edit only the paths listed for workstream N. Goal: <paste the goal>. First write the checks and tests for that goal (no network or AWS in unit tests: mock boto3 with `moto` or fakes; mark live tests `@pytest.mark.live`), then propose a plan, then implement. Before finishing, run `python -m pytest tests -q -m "not live"` from `agent/` and, if you touched `infra/`, an offline `cdk synth`. Do not deploy anything; Caleb deploys.
+> You are working on FieldWatch (repo FarmU), workstream **N: <name>**. Read `CLAUDE.md`, `docs/decisions.md`, `docs/spike-findings.md`, and the plan sections listed for workstream N in `docs/workstreams.md` (plan docs are in `docs/`). Decisions and spike findings override the plan docs. Build against `agent/fieldwatch/contracts.py` and the samples in `agent/fixtures/contracts/`; do not change contracts. Call other lanes only through `agent/fieldwatch/interfaces.py`; if something you need is missing there, stop and propose it as a separate PR instead of guessing names. Edit only the paths listed for workstream N. Goal: <paste the goal>. First write the checks and tests for that goal (no network or AWS in unit tests: mock boto3 with `moto` or fakes; mark live tests `@pytest.mark.live`), then propose a plan, then implement. Before finishing, run `python -m pytest tests -q -m "not live"` from `agent/` and, if you touched `infra/`, an offline `cdk synth`. Do not deploy anything; Caleb deploys.
