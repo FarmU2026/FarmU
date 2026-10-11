@@ -1,0 +1,550 @@
+{
+  "models": {
+    "supervisor": "Claude Haiku 4.5",
+    "specialists": "Claude Haiku 4.5"
+  },
+  "supervisor": {
+    "title": "Supervisor agent",
+    "model": "Claude Haiku 4.5",
+    "tools": [
+      {
+        "name": "ask_imagery",
+        "label": "Ask the satellite specialist",
+        "description": "Ask the imagery specialist what the satellite shows on a field: where the problem area is and its shape. Returns evidence items. Pass the field id from list_fields.",
+        "sources": []
+      },
+      {
+        "name": "ask_environment",
+        "label": "Ask the weather and soil specialist",
+        "description": "Ask the environment specialist whether weather, hail, drought, soil or terrain explain the stress. Returns evidence items. Pass the field id from list_fields.",
+        "sources": []
+      },
+      {
+        "name": "ask_agronomy",
+        "label": "Ask the crop health specialist",
+        "description": "Ask the agronomy specialist about disease and pest reports and field history. Returns evidence items. Pass the field id from list_fields.",
+        "sources": []
+      },
+      {
+        "name": "list_fields",
+        "label": "Your fields",
+        "description": "List every field on the farm with its id, the name the farmer uses, crop and acres.",
+        "sources": [
+          "farm"
+        ]
+      },
+      {
+        "name": "get_field_context",
+        "label": "Field history, terrain, water, prices",
+        "description": "Everything static about a field: soil, terrain, mapped water (flood zones, streams, wetlands), crop history, neighbors, economics.",
+        "sources": [
+          "nrcs",
+          "usgs_3dep",
+          "csb",
+          "fema",
+          "nhd",
+          "nwi",
+          "nass"
+        ]
+      },
+      {
+        "name": "send_farmer_message",
+        "label": "Text the farmer (no YES needed)",
+        "description": "Text a person on the farm (no approval needed). Plain words, under ~300 characters, no emoji, the field name the farmer uses. person_id from the farm's people (the farmer is the default). urgency: low, actionable or urgent (urgent skips quiet hours).",
+        "sources": [
+          "notify"
+        ]
+      }
+    ]
+  },
+  "specialists": [
+    {
+      "name": "imagery",
+      "title": "Satellite specialist",
+      "role": "Satellite / imagery",
+      "model": "Claude Haiku 4.5",
+      "tools": [
+        {
+          "name": "list_fields",
+          "label": "Your fields",
+          "description": "List every field on the farm with its id, the name the farmer uses, crop and acres.",
+          "sources": [
+            "farm"
+          ]
+        },
+        {
+          "name": "look_at_field",
+          "label": "Latest satellite photos",
+          "description": "Pull the latest cloud-free satellite pass over a field and LOOK at it.",
+          "sources": [
+            "sentinel2"
+          ]
+        },
+        {
+          "name": "get_scene_analysis",
+          "label": "Satellite check results",
+          "description": "Pre-computed analysis of the latest satellite pass, if the pipeline has run for this field.",
+          "sources": [
+            "scene_store"
+          ]
+        },
+        {
+          "name": "analyze_field",
+          "label": "Problem areas from the satellite check",
+          "description": "Deterministic analysis of the latest clear scene on or before as_of: masked indices, baseline and change z-scores, problem regions with pattern features, gates.",
+          "sources": [
+            "sentinel2"
+          ]
+        },
+        {
+          "name": "get_index_history",
+          "label": "Crop health over the season",
+          "description": "Crop-health index (ndvi, ndre or ndmi) per clear satellite pass for a field, with the same-weeks-in-prior-seasons expectation and z; adds the problem region's median when region_id is given.",
+          "sources": [
+            "sentinel2"
+          ]
+        },
+        {
+          "name": "compare_to_cohort",
+          "label": "Crop health vs. same-crop fields",
+          "description": "Field crop health vs same-crop neighbor fields on the same pass, as of a date. Returns status no_cohort (not an error) when there are no neighbors.",
+          "sources": [
+            "sentinel2",
+            "farm"
+          ]
+        },
+        {
+          "name": "test_overlap",
+          "label": "Problem area vs. low spots, sand, edges",
+          "description": "How much of a problem region lies on a layer (field_edge, pivot_ring, lowspot, soil_sandy, hail_swath), the share expected by chance, and a p-value.",
+          "sources": [
+            "farm",
+            "usgs_3dep",
+            "nrcs"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "environment",
+      "title": "Weather and soil specialist",
+      "role": "Weather & soil / environment",
+      "model": "Claude Haiku 4.5",
+      "tools": [
+        {
+          "name": "list_fields",
+          "label": "Your fields",
+          "description": "List every field on the farm with its id, the name the farmer uses, crop and acres.",
+          "sources": [
+            "farm"
+          ]
+        },
+        {
+          "name": "get_weather",
+          "label": "Recent rain and heat",
+          "description": "Last 30 days of weather at a field from Open-Meteo: daily rain, max temperature, totals vs a normal.",
+          "sources": [
+            "open_meteo"
+          ]
+        },
+        {
+          "name": "get_hail",
+          "label": "Hail size and hail reports",
+          "description": "Max radar hail size (mm) over a field for a date range, plus nearby ground reports.",
+          "sources": [
+            "mrms",
+            "spc"
+          ]
+        },
+        {
+          "name": "get_drought",
+          "label": "Drought level for the county",
+          "description": "US Drought Monitor category for a county as of a date.",
+          "sources": [
+            "usdm"
+          ]
+        },
+        {
+          "name": "get_soil",
+          "label": "Soil type and drainage",
+          "description": "Soil survey for a field.",
+          "sources": [
+            "nrcs"
+          ]
+        },
+        {
+          "name": "get_soil_profile",
+          "label": "Soil map areas and texture",
+          "description": "Soil map units for a field from NRCS Soil Data Access.",
+          "sources": [
+            "nrcs"
+          ]
+        },
+        {
+          "name": "get_field_context",
+          "label": "Field history, terrain, water, prices",
+          "description": "Everything static about a field: soil, terrain, mapped water (flood zones, streams, wetlands), crop history, neighbors, economics.",
+          "sources": [
+            "nrcs",
+            "usgs_3dep",
+            "csb",
+            "fema",
+            "nhd",
+            "nwi",
+            "nass"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "agronomy",
+      "title": "Crop health specialist",
+      "role": "Crop health / agronomy",
+      "model": "Claude Haiku 4.5",
+      "tools": [
+        {
+          "name": "list_fields",
+          "label": "Your fields",
+          "description": "List every field on the farm with its id, the name the farmer uses, crop and acres.",
+          "sources": [
+            "farm"
+          ]
+        },
+        {
+          "name": "get_disease_reports",
+          "label": "County disease and pest reports",
+          "description": "County disease confirmations for the season (EDDMapS).",
+          "sources": [
+            "eddmaps"
+          ]
+        },
+        {
+          "name": "get_field_context",
+          "label": "Field history, terrain, water, prices",
+          "description": "Everything static about a field: soil, terrain, mapped water (flood zones, streams, wetlands), crop history, neighbors, economics.",
+          "sources": [
+            "nrcs",
+            "usgs_3dep",
+            "csb",
+            "fema",
+            "nhd",
+            "nwi",
+            "nass"
+          ]
+        }
+      ]
+    }
+  ],
+  "scorer": {
+    "title": "Scorer (rules, not AI)",
+    "tools": [
+      {
+        "name": "precheck_evidence",
+        "label": "Check what we already know",
+        "description": "FIRST STEP. Score the precomputed evidence for this field (pattern analysis and open watches). If the answer is decisive the result says fast_path true: skip the specialists and go to impact.",
+        "sources": [
+          "scene_store",
+          "conditions"
+        ]
+      },
+      {
+        "name": "score_hypotheses",
+        "label": "Turn evidence into percents",
+        "description": "Score every piece of evidence gathered so far. Call it after the specialists answer, and again if new evidence arrives. Returns each condition's percent and status, how_sure wording and close_call. Use ONLY these numbers and this wording for how sure we are.",
+        "sources": [
+          "conditions"
+        ]
+      },
+      {
+        "name": "estimate_impact",
+        "label": "Dollar range at stake",
+        "description": "Dollar range at stake for the likely condition on the affected acres, from published loss tables. condition is a condition id from the score result. Pass crop, expected_yield and price from the field when you know them. Use these dollar figures as given.",
+        "sources": [
+          "loss_tables"
+        ]
+      }
+    ]
+  },
+  "approval": {
+    "title": "Approval (your YES)",
+    "tools": [
+      {
+        "name": "create_work_order",
+        "label": "Repair ticket with a map pin",
+        "description": "Send a repair work order with a map pin to the person who does repairs. Requires farmer approval.",
+        "sources": [
+          "notify"
+        ],
+        "gate": "Needs the farmer's YES (recorded by code, not the AI)"
+      },
+      {
+        "name": "create_scout_pin",
+        "label": "Scouting pin for the field",
+        "description": "Drop a scouting pin with coordinates and what to look for. Requires farmer approval.",
+        "sources": [
+          "notify"
+        ],
+        "gate": "Needs the farmer's YES (recorded by code, not the AI)"
+      }
+    ]
+  },
+  "sources": [
+    {
+      "id": "farm",
+      "short": "FieldWatch farm records",
+      "name": "FieldWatch farm records",
+      "gives": "Fields, crops, acres and the people on the farm",
+      "updates": null,
+      "used_by": [
+        "Your fields",
+        "Crop health vs. same-crop fields",
+        "Problem area vs. low spots, sand, edges"
+      ],
+      "code": "agent/fieldwatch/farmdata.py"
+    },
+    {
+      "id": "scene_store",
+      "short": "FieldWatch satellite check",
+      "name": "FieldWatch satellite check (stored)",
+      "gives": "Latest pre-computed weak-spot analysis per field, from the scene pipeline",
+      "updates": null,
+      "used_by": [
+        "Satellite check results",
+        "Check what we already know"
+      ],
+      "code": "agent/fieldwatch/farmdata.py"
+    },
+    {
+      "id": "sentinel2",
+      "short": "Sentinel-2 satellite",
+      "name": "Sentinel-2 satellite (Element 84 Earth Search)",
+      "gives": "Cloud-free images and crop-health index (NDVI, NDRE, NDMI) at 10 m pixels",
+      "updates": "Revisits every 2-5 days",
+      "used_by": [
+        "Latest satellite photos",
+        "Problem areas from the satellite check",
+        "Crop health over the season",
+        "Crop health vs. same-crop fields"
+      ],
+      "code": "agent/fieldwatch/analysis/loader.py"
+    },
+    {
+      "id": "open_meteo",
+      "short": "Open-Meteo",
+      "name": "Open-Meteo weather archive",
+      "gives": "Daily rain and max temperature for the last 30 days at the field",
+      "updates": "Archive lags about 2 days",
+      "used_by": [
+        "Recent rain and heat"
+      ],
+      "code": "agent/fieldwatch/tools.py"
+    },
+    {
+      "id": "mrms",
+      "short": "NOAA MRMS radar hail",
+      "name": "NOAA MRMS radar hail",
+      "gives": "Largest hail size (MESH, mm) over the field, per day, on a 0.01-degree grid",
+      "updates": "One 24-hour product per day",
+      "used_by": [
+        "Hail size and hail reports"
+      ],
+      "code": "agent/fieldwatch/hazards/__init__.py"
+    },
+    {
+      "id": "spc",
+      "short": "NOAA SPC reports",
+      "name": "NOAA SPC storm reports",
+      "gives": "Hail reports within 10 km of the field",
+      "updates": "One report file per day",
+      "used_by": [
+        "Hail size and hail reports"
+      ],
+      "code": "agent/fieldwatch/hazards/__init__.py"
+    },
+    {
+      "id": "usdm",
+      "short": "U.S. Drought Monitor",
+      "name": "U.S. Drought Monitor",
+      "gives": "Drought category for the county (the worst one covering at least half of it)",
+      "updates": null,
+      "used_by": [
+        "Drought level for the county"
+      ],
+      "code": "agent/fieldwatch/hazards/__init__.py"
+    },
+    {
+      "id": "nrcs",
+      "short": "NRCS soil survey",
+      "name": "USDA NRCS Soil Data Access (SSURGO)",
+      "gives": "Soil map areas, texture, available water, sandy share and drainage",
+      "updates": null,
+      "used_by": [
+        "Problem area vs. low spots, sand, edges",
+        "Soil type and drainage",
+        "Soil map areas and texture",
+        "Field history, terrain, water, prices"
+      ],
+      "code": "agent/fieldwatch/context/soil.py"
+    },
+    {
+      "id": "usgs_3dep",
+      "short": "USGS 3DEP elevation",
+      "name": "USGS 3DEP elevation",
+      "gives": "1 m elevation: low spots and slope inside the field",
+      "updates": null,
+      "used_by": [
+        "Problem area vs. low spots, sand, edges",
+        "Field history, terrain, water, prices"
+      ],
+      "code": "agent/fieldwatch/context/terrain.py"
+    },
+    {
+      "id": "fema",
+      "short": "FEMA flood zones",
+      "name": "FEMA flood maps (NFHL)",
+      "gives": "Mapped flood zones that touch the field",
+      "updates": null,
+      "used_by": [
+        "Field history, terrain, water, prices"
+      ],
+      "code": "agent/fieldwatch/context/water.py"
+    },
+    {
+      "id": "nhd",
+      "short": "USGS NHD streams",
+      "name": "USGS National Hydrography Dataset",
+      "gives": "Mapped streams near the field",
+      "updates": null,
+      "used_by": [
+        "Field history, terrain, water, prices"
+      ],
+      "code": "agent/fieldwatch/context/water.py"
+    },
+    {
+      "id": "nwi",
+      "short": "USFWS wetlands",
+      "name": "USFWS National Wetlands Inventory",
+      "gives": "Mapped wetlands on the field",
+      "updates": null,
+      "used_by": [
+        "Field history, terrain, water, prices"
+      ],
+      "code": "agent/fieldwatch/context/water.py"
+    },
+    {
+      "id": "csb",
+      "short": "USDA crop history",
+      "name": "USDA Crop Sequence Boundaries 2018-2025",
+      "gives": "Crop history for the drawn field",
+      "updates": null,
+      "used_by": [
+        "Field history, terrain, water, prices"
+      ],
+      "code": "agent/fieldwatch/context/boundaries.py"
+    },
+    {
+      "id": "nass",
+      "short": "USDA NASS yields",
+      "name": "USDA NASS Quick Stats",
+      "gives": "County median yield and national price; FieldWatch planning defaults when missing",
+      "updates": "Annual yields",
+      "used_by": [
+        "Field history, terrain, water, prices"
+      ],
+      "code": "agent/fieldwatch/context/economics.py"
+    },
+    {
+      "id": "eddmaps",
+      "short": "EDDMapS reports",
+      "name": "EDDMapS disease and pest reports",
+      "gives": "County disease and pest confirmations for the season",
+      "updates": null,
+      "used_by": [
+        "County disease and pest reports"
+      ],
+      "code": "agent/fieldwatch/context/disease.py"
+    },
+    {
+      "id": "loss_tables",
+      "short": "FieldWatch loss tables",
+      "name": "FieldWatch loss tables",
+      "gives": "Yield loss range by condition, crop, stage and severity, turned into dollars",
+      "updates": null,
+      "used_by": [
+        "Dollar range at stake"
+      ],
+      "code": "agent/fieldwatch/scoring.py"
+    },
+    {
+      "id": "conditions",
+      "short": "FieldWatch condition catalog",
+      "name": "FieldWatch condition catalog",
+      "gives": "Prior odds and evidence weights per condition; the scorer uses these, never the AI",
+      "updates": null,
+      "used_by": [
+        "Check what we already know",
+        "Turn evidence into percents"
+      ],
+      "code": "agent/fieldwatch/scoring.py"
+    },
+    {
+      "id": "notify",
+      "short": "Text message",
+      "name": "Text messages (notify lane)",
+      "gives": "Texts to people on the farm; quiet hours and the daily cap are enforced there",
+      "updates": null,
+      "used_by": [
+        "Repair ticket with a map pin",
+        "Scouting pin for the field",
+        "Text the farmer (no YES needed)"
+      ],
+      "code": "agent/fieldwatch/registry.py"
+    },
+    {
+      "id": "memory",
+      "short": "AgentCore Memory",
+      "name": "AgentCore Memory (past investigations)",
+      "gives": "What past investigations on this farm found; recalled into the supervisor's prompt, not a tool",
+      "updates": null,
+      "recall": true,
+      "used_by": [],
+      "code": "agent/fieldwatch/memory.py"
+    }
+  ],
+  "services": [
+    {
+      "name": "AgentCore Runtime",
+      "role": "agents"
+    },
+    {
+      "name": "AgentCore Gateway",
+      "role": "tools, MCP"
+    },
+    {
+      "name": "AgentCore Memory",
+      "role": null
+    },
+    {
+      "name": "Bedrock",
+      "role": "Claude"
+    },
+    {
+      "name": "EventBridge + Step Functions + Lambda",
+      "role": "pipeline"
+    },
+    {
+      "name": "DynamoDB + S3",
+      "role": null
+    },
+    {
+      "name": "AppSync",
+      "role": "live feed"
+    }
+  ],
+  "generated_from": [
+    "agent/fieldwatch/agents.py",
+    "agent/fieldwatch/registry.py",
+    "agent/fieldwatch/tools.py",
+    "agent/fieldwatch/config.py"
+  ]
+}
