@@ -111,6 +111,12 @@ def _sample(name: str, model: type[BaseModel]) -> Callable:
     return fn
 
 
+def analyze_field(**kwargs) -> C.FieldAnalysisResult:
+    from .analysis import analyze  # lazy: rasterio and scipy load only when the tool runs
+
+    return analyze(C.FieldAnalysisRequest.model_validate(kwargs))
+
+
 TOOLS: list[ToolSpec] = [
     # --- live today (tools.py); outputs still untyped dicts, typed by their workstream ---
     ToolSpec("list_fields", "List every field on the farm with its id, name, crop and acres.", "read",
@@ -126,8 +132,7 @@ TOOLS: list[ToolSpec] = [
     # --- planned: stubs return contract samples until the workstream lands ---
     ToolSpec("analyze_field", "Deterministic analysis of the latest clear scene on or before as_of: masked indices, "
              "baseline and change z-scores, problem regions with pattern features, gates.", "read",
-             C.FieldAnalysisRequest, _sample("field_analysis_result", C.FieldAnalysisResult),
-             output_model=C.FieldAnalysisResult, workstream=1, stub=True),
+             C.FieldAnalysisRequest, analyze_field, output_model=C.FieldAnalysisResult, workstream=1),
     ToolSpec("get_hail", "Max radar hail size (mm) over a field for a date range, plus nearby ground reports.", "read",
              FieldRangeIn, H.get_hail, output_model=C.HailReport, workstream=3),
     ToolSpec("get_drought", "US Drought Monitor category for a county as of a date.", "read",

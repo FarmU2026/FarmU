@@ -77,6 +77,16 @@ def _create_tables():
         )
 
 
+@pytest.fixture(autouse=True)
+def sample_analyzer(monkeypatch):
+    """The real analyzer (WS1) reads Sentinel-2 over the network; these tests run the pipeline on the contract sample."""
+    from fieldwatch import registry
+
+    monkeypatch.setitem(registry.BY_NAME, "analyze_field", registry.ToolSpec(
+        "analyze_field", "d", "read", C.FieldAnalysisRequest, registry._sample("field_analysis_result", C.FieldAnalysisResult),
+        output_model=C.FieldAnalysisResult))
+
+
 @pytest.fixture
 def aws(monkeypatch):
     for k, v in {"AWS_ACCESS_KEY_ID": "x", "AWS_SECRET_ACCESS_KEY": "x", "AWS_DEFAULT_REGION": "us-west-2",
