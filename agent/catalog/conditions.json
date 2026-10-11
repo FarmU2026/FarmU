@@ -1,0 +1,559 @@
+{
+  "version": "2026-10-10.2",
+  "status": "DRAFT: priors, weights and loss fractions are hand-set approximations of published extension guidance, not transcribed tables. Pending agronomy review by Caleb. Citations name the publication family to verify.",
+  "sources": {
+    "isu_hail": "Iowa State Univ. Extension, corn and soybean hail damage guides (yield loss by stage and defoliation)",
+    "purdue_water": "Purdue Univ. Extension (R.L. Nielsen), corn water stress around silking and grain fill",
+    "unl_irrig": "Univ. of Nebraska-Lincoln Extension, center pivot irrigation scheduling and failure effects",
+    "umn_n": "Univ. of Minnesota / Iowa State Extension, corn nitrogen deficiency symptoms and loss",
+    "cropprotection": "Crop Protection Network (corn, soybean disease guides: tar spot, gray leaf spot, SDS)",
+    "ipmpipe": "Corn ipmPIPE / EDDMapS county disease reports",
+    "ksu_drift": "K-State / Univ. of Missouri Extension, herbicide drift symptoms and soybean/corn injury",
+    "isu_stand": "Iowa State Univ. Extension, corn and soybean planter skips, stand and yield",
+    "isu_flood": "Iowa State / Purdue Extension, flooding and ponding effects on corn and soybean",
+    "nrcs_soil": "USDA NRCS Soil Data Access / Web Soil Survey (sandy texture, available water capacity)",
+    "usdm": "US Drought Monitor (drought.gov category definitions)",
+    "noaa_mrms": "NOAA MRMS MESH radar hail estimate; SPC storm reports",
+    "rma": "USDA RMA Loss Adjustment Standards Handbook / Crop Insurance Handbook",
+    "nass": "USDA NASS Crop Production and Quick Stats (state yield trend)",
+    "ams": "USDA AMS / CME futures (planning price)",
+    "analyzer": "FieldWatch analyzer pattern features (docs/data-pipelines.md M3); weight set by hand",
+    "farmer": "Farmer's own report (farmer_reply); weight set by hand",
+    "photo": "Photo diagnosis by the imagery specialist; weight set by hand",
+    "judgment": "Agronomic judgment, to be reviewed"
+  },
+  "stage_groups": {
+    "early": "planting to V5 (soy: VE to V3)",
+    "vegetative": "V6 to pre-tassel (soy: V4 to before R1)",
+    "flowering": "VT, R1, R2 (soy: R1, R2)",
+    "grain_fill": "R3 to R5 (soy: R3 to R5)",
+    "maturity": "R6 and later (soy: R6+)"
+  },
+  "conditions": {
+    "pivot_failure": {
+      "label": "Pivot not watering",
+      "prior": 0.1,
+      "crop_adjust": {
+        "corn": 0.2,
+        "soybeans": 0.0
+      },
+      "irrigated_adjust": {
+        "true": 0.7,
+        "false": -6.0
+      },
+      "stage_adjust": {
+        "flowering": 0.5,
+        "grain_fill": 0.3
+      },
+      "requires_irrigated": true,
+      "prior_reason": "Hand-set base rate for a flagged anomaly, to be tuned on real examples (docs/data-pipelines.md M4).",
+      "weights": {
+        "ring_pattern_strong": {
+          "weight": 3.2,
+          "reason": "A ring or arc at one radius matches a clogged or dead span (last-span path).",
+          "source": "analyzer"
+        },
+        "ring_pattern_weak": {
+          "weight": 1.2,
+          "reason": "A faint ring is weak support for a span problem.",
+          "source": "analyzer"
+        },
+        "wedge_pattern_strong": {
+          "weight": 2.0,
+          "reason": "A sector stress shape fits a stuck or leaking span or end-gun issue.",
+          "source": "analyzer"
+        },
+        "edge_pattern_strong": {
+          "weight": 0.8,
+          "reason": "Edge-band stress can be a pivot corner or end-of-run shortfall.",
+          "source": "unl_irrig"
+        },
+        "farmer_reports_pivot_down": {
+          "weight": 3.5,
+          "reason": "The farmer says the pivot was down or erroring.",
+          "source": "farmer"
+        },
+        "farmer_reports_pivot_ok": {
+          "weight": 2.0,
+          "reason": "The farmer says the pivot ran normally and on schedule.",
+          "source": "farmer"
+        },
+        "rain_deficit_30d": {
+          "weight": 0.6,
+          "reason": "A dry month raises reliance on the pivot, so a failure shows up sooner.",
+          "source": "unl_irrig"
+        },
+        "rain_normal_30d": {
+          "weight": 0.4,
+          "reason": "Normal rain masks a short pivot outage.",
+          "source": "unl_irrig"
+        },
+        "stress_uniform_field": {
+          "weight": 1.2,
+          "reason": "Whole-field uniform stress points away from a localized irrigation fault.",
+          "source": "analyzer"
+        }
+      }
+    },
+    "hail": {
+      "label": "Hail damage",
+      "prior": 0.08,
+      "crop_adjust": {
+        "corn": 0.0,
+        "soybeans": 0.0
+      },
+      "irrigated_adjust": {},
+      "stage_adjust": {
+        "early": -0.5,
+        "flowering": 0.3,
+        "grain_fill": 0.3
+      },
+      "requires_irrigated": false,
+      "prior_reason": "Hand-set base rate for a flagged anomaly, to be tuned on real examples (docs/data-pipelines.md M4).",
+      "weights": {
+        "hail_mesh_large": {
+          "weight": 3.5,
+          "reason": "Radar hail estimate at or above 25 mm over the field.",
+          "source": "noaa_mrms"
+        },
+        "hail_mesh_moderate": {
+          "weight": 2.2,
+          "reason": "Radar hail estimate of 12-25 mm over part of the field.",
+          "source": "noaa_mrms"
+        },
+        "no_hail_mesh": {
+          "weight": 3.0,
+          "reason": "Radar shows no hail over the field in the window.",
+          "source": "noaa_mrms"
+        },
+        "hail_ground_report_near": {
+          "weight": 2.0,
+          "reason": "A storm report of hail within about 10 km.",
+          "source": "noaa_mrms"
+        },
+        "hail_swath_overlap_high": {
+          "weight": 3.0,
+          "reason": "The stressed area lines up with the hail swath.",
+          "source": "analyzer"
+        },
+        "hail_swath_no_overlap": {
+          "weight": 2.0,
+          "reason": "The stressed area is outside the hail swath.",
+          "source": "analyzer"
+        },
+        "photo_leaf_shredding": {
+          "weight": 3.0,
+          "reason": "Photo shows torn, shredded leaves and bruised stalks.",
+          "source": "photo"
+        },
+        "sudden_drop_after_storm": {
+          "weight": 1.5,
+          "reason": "NDVI dropped sharply right after a storm date.",
+          "source": "analyzer"
+        }
+      }
+    },
+    "drought": {
+      "label": "Dry weather stress",
+      "prior": 0.15,
+      "crop_adjust": {
+        "corn": 0.0,
+        "soybeans": 0.0
+      },
+      "irrigated_adjust": {
+        "true": -0.8,
+        "false": 0.5
+      },
+      "stage_adjust": {
+        "flowering": 0.3,
+        "grain_fill": 0.3
+      },
+      "requires_irrigated": false,
+      "prior_reason": "Hand-set base rate for a flagged anomaly, to be tuned on real examples (docs/data-pipelines.md M4).",
+      "weights": {
+        "rain_deficit_30d": {
+          "weight": 2.5,
+          "reason": "Rain over 30 days well below normal.",
+          "source": "purdue_water"
+        },
+        "rain_normal_30d": {
+          "weight": 2.0,
+          "reason": "Rain over 30 days near or above normal.",
+          "source": "purdue_water"
+        },
+        "drought_monitor_d1_plus": {
+          "weight": 2.0,
+          "reason": "County is D1 or worse on the Drought Monitor.",
+          "source": "usdm"
+        },
+        "drought_monitor_none": {
+          "weight": 1.5,
+          "reason": "County shows no drought category.",
+          "source": "usdm"
+        },
+        "heat_days_over_35c": {
+          "weight": 1.0,
+          "reason": "Several days above 35 C add water demand.",
+          "source": "purdue_water"
+        },
+        "stress_uniform_field": {
+          "weight": 1.5,
+          "reason": "Broad field-wide stress fits weather rather than a local fault.",
+          "source": "analyzer"
+        },
+        "pattern_localized": {
+          "weight": 1.0,
+          "reason": "Stress in a sharp local shape is less typical of drought alone.",
+          "source": "analyzer"
+        }
+      }
+    },
+    "ponding": {
+      "label": "Standing water / waterlogging",
+      "prior": 0.1,
+      "crop_adjust": {
+        "corn": 0.0,
+        "soybeans": 0.2
+      },
+      "irrigated_adjust": {},
+      "stage_adjust": {
+        "early": 0.5
+      },
+      "requires_irrigated": false,
+      "prior_reason": "Hand-set base rate for a flagged anomaly, to be tuned on real examples (docs/data-pipelines.md M4).",
+      "weights": {
+        "lowspot_overlap_high": {
+          "weight": 3.0,
+          "reason": "The stressed area sits in the terrain low spots.",
+          "source": "analyzer"
+        },
+        "lowspot_overlap_none": {
+          "weight": 2.0,
+          "reason": "The stressed area is not in low spots.",
+          "source": "analyzer"
+        },
+        "heavy_rain_7d": {
+          "weight": 2.0,
+          "reason": "Heavy rain in the last week (about 50 mm or more).",
+          "source": "isu_flood"
+        },
+        "rain_excess_30d": {
+          "weight": 1.5,
+          "reason": "Rain over 30 days well above normal.",
+          "source": "isu_flood"
+        },
+        "soil_poorly_drained": {
+          "weight": 1.5,
+          "reason": "Soil map units are poorly or somewhat poorly drained.",
+          "source": "nrcs_soil"
+        },
+        "soil_well_drained": {
+          "weight": 1.5,
+          "reason": "Soil map units are well drained.",
+          "source": "nrcs_soil"
+        },
+        "photo_standing_water": {
+          "weight": 3.0,
+          "reason": "Photo shows standing water or yellowed drowned plants.",
+          "source": "photo"
+        }
+      }
+    },
+    "nitrogen": {
+      "label": "Nitrogen shortage",
+      "prior": 0.12,
+      "crop_adjust": {
+        "corn": 0.5,
+        "soybeans": -2.5,
+        "wheat": 0.0
+      },
+      "irrigated_adjust": {},
+      "stage_adjust": {
+        "early": -1.0,
+        "vegetative": 0.3,
+        "flowering": 0.3
+      },
+      "requires_irrigated": false,
+      "prior_reason": "Hand-set base rate for a flagged anomaly, to be tuned on real examples (docs/data-pipelines.md M4).",
+      "weights": {
+        "rain_excess_30d": {
+          "weight": 1.2,
+          "reason": "Wet spells leach or denitrify nitrogen.",
+          "source": "umn_n"
+        },
+        "corn_after_corn": {
+          "weight": 1.0,
+          "reason": "Corn after corn needs more nitrogen and gets no rotation credit.",
+          "source": "umn_n"
+        },
+        "prior_crop_soybeans": {
+          "weight": 0.8,
+          "reason": "Soybean rotation credit lowers nitrogen need.",
+          "source": "umn_n"
+        },
+        "pattern_uniform_pale": {
+          "weight": 1.2,
+          "reason": "Field-wide pale green, worst on lower leaves.",
+          "source": "umn_n"
+        },
+        "ndre_low_ndvi_normal": {
+          "weight": 1.5,
+          "reason": "Red-edge index low while NDVI is still normal (chlorophyll first).",
+          "source": "analyzer"
+        },
+        "photo_v_shaped_firing": {
+          "weight": 3.0,
+          "reason": "Photo shows V-shaped yellowing from leaf tip on lower leaves.",
+          "source": "photo"
+        },
+        "farmer_reports_n_short": {
+          "weight": 2.5,
+          "reason": "The farmer applied less nitrogen than planned.",
+          "source": "farmer"
+        },
+        "farmer_reports_n_full": {
+          "weight": 1.5,
+          "reason": "The farmer applied the full nitrogen rate on time.",
+          "source": "farmer"
+        },
+        "sandy_soil_overlap_high": {
+          "weight": 0.8,
+          "reason": "Sandy zones lose nitrogen to leaching.",
+          "source": "nrcs_soil"
+        }
+      }
+    },
+    "herbicide_drift": {
+      "label": "Herbicide drift",
+      "prior": 0.06,
+      "crop_adjust": {
+        "soybeans": 0.5,
+        "corn": 0.0
+      },
+      "irrigated_adjust": {},
+      "stage_adjust": {
+        "early": -0.3,
+        "vegetative": 0.3
+      },
+      "requires_irrigated": false,
+      "prior_reason": "Hand-set base rate for a flagged anomaly, to be tuned on real examples (docs/data-pipelines.md M4).",
+      "weights": {
+        "edge_pattern_strong": {
+          "weight": 2.5,
+          "reason": "Injury concentrated on one field edge fits drift from a neighbor.",
+          "source": "analyzer"
+        },
+        "edge_pattern_none": {
+          "weight": 1.0,
+          "reason": "No edge concentration is less typical of drift.",
+          "source": "analyzer"
+        },
+        "photo_leaf_cupping": {
+          "weight": 3.0,
+          "reason": "Photo shows cupped, strapped or crinkled new leaves.",
+          "source": "photo"
+        },
+        "wind_during_spray_window": {
+          "weight": 1.5,
+          "reason": "Breezy spray-season days with a neighbor application.",
+          "source": "ksu_drift"
+        },
+        "farmer_reports_neighbor_spray": {
+          "weight": 3.0,
+          "reason": "The farmer knows a neighbor sprayed nearby.",
+          "source": "farmer"
+        }
+      }
+    },
+    "planter_skip": {
+      "label": "Planter or equipment skips",
+      "prior": 0.08,
+      "crop_adjust": {
+        "corn": 0.0,
+        "soybeans": 0.0
+      },
+      "irrigated_adjust": {},
+      "stage_adjust": {
+        "early": 1.0,
+        "vegetative": 0.2,
+        "flowering": -1.0,
+        "grain_fill": -1.5,
+        "maturity": -2.0
+      },
+      "requires_irrigated": false,
+      "prior_reason": "Hand-set base rate for a flagged anomaly, to be tuned on real examples (docs/data-pipelines.md M4).",
+      "weights": {
+        "stripe_pattern_strong": {
+          "weight": 3.0,
+          "reason": "Straight parallel bands match planter row units or sprayer passes.",
+          "source": "analyzer"
+        },
+        "stripe_pattern_none": {
+          "weight": 2.0,
+          "reason": "No stripe geometry in the stressed area.",
+          "source": "analyzer"
+        },
+        "stripe_width_matches_implement": {
+          "weight": 1.5,
+          "reason": "Band spacing matches the planter or sprayer width.",
+          "source": "analyzer"
+        },
+        "photo_gaps_in_row": {
+          "weight": 3.0,
+          "reason": "Photo shows missing plants or doubles along the row.",
+          "source": "photo"
+        },
+        "farmer_reports_planter_issue": {
+          "weight": 3.0,
+          "reason": "The farmer remembers a planter or sprayer problem.",
+          "source": "farmer"
+        }
+      }
+    },
+    "disease_pest": {
+      "label": "Disease or insects",
+      "prior": 0.12,
+      "crop_adjust": {
+        "corn": 0.2,
+        "soybeans": 0.2
+      },
+      "irrigated_adjust": {},
+      "stage_adjust": {
+        "early": -1.0,
+        "vegetative": -0.4,
+        "flowering": 0.3,
+        "grain_fill": 0.6
+      },
+      "requires_irrigated": false,
+      "prior_reason": "Hand-set base rate for a flagged anomaly, to be tuned on real examples (docs/data-pipelines.md M4).",
+      "weights": {
+        "disease_confirmed_county": {
+          "weight": 2.0,
+          "reason": "Tar spot, gray leaf spot, SDS or similar confirmed in the county this season.",
+          "source": "ipmpipe"
+        },
+        "disease_history_county": {
+          "weight": 0.8,
+          "reason": "The county has a history of the disease in past seasons.",
+          "source": "ipmpipe"
+        },
+        "no_disease_reports_county": {
+          "weight": 1.0,
+          "reason": "No confirmed disease reports in the county this season.",
+          "source": "ipmpipe"
+        },
+        "humid_wet_weather_30d": {
+          "weight": 1.2,
+          "reason": "Warm, humid and wet weather favors foliar disease.",
+          "source": "cropprotection"
+        },
+        "dry_weather_30d": {
+          "weight": 0.8,
+          "reason": "Dry weather slows foliar disease.",
+          "source": "cropprotection"
+        },
+        "patchy_irregular_pattern": {
+          "weight": 0.8,
+          "reason": "Irregular patches fit disease or insect spread.",
+          "source": "analyzer"
+        },
+        "photo_tar_spot_lesions": {
+          "weight": 3.5,
+          "reason": "Photo shows raised black tar-spot stromata.",
+          "source": "photo"
+        },
+        "photo_gray_leaf_spot_lesions": {
+          "weight": 3.0,
+          "reason": "Photo shows rectangular gray lesions between veins.",
+          "source": "photo"
+        },
+        "photo_sds_symptoms": {
+          "weight": 3.0,
+          "reason": "Photo shows interveinal scorch and root or stem symptoms (soybean SDS).",
+          "source": "photo"
+        },
+        "photo_insect_feeding": {
+          "weight": 3.0,
+          "reason": "Photo shows insects or chewing damage.",
+          "source": "photo"
+        },
+        "photo_no_lesions": {
+          "weight": 1.5,
+          "reason": "Photo shows clean leaves without lesions or insects.",
+          "source": "photo"
+        }
+      }
+    },
+    "sandy_soil_water_stress": {
+      "label": "Sandy soil running short of water",
+      "prior": 0.1,
+      "crop_adjust": {
+        "corn": 0.0,
+        "soybeans": 0.0
+      },
+      "irrigated_adjust": {
+        "true": -0.6,
+        "false": 0.4
+      },
+      "stage_adjust": {
+        "flowering": 0.3,
+        "grain_fill": 0.3
+      },
+      "requires_irrigated": false,
+      "prior_reason": "Hand-set base rate for a flagged anomaly, to be tuned on real examples (docs/data-pipelines.md M4).",
+      "weights": {
+        "sandy_soil_overlap_high": {
+          "weight": 3.0,
+          "reason": "The stressed area sits on sandy, low-water-holding soil.",
+          "source": "nrcs_soil"
+        },
+        "soil_not_sandy": {
+          "weight": 2.5,
+          "reason": "Soil is uniform loam or silt loam, not sand.",
+          "source": "nrcs_soil"
+        },
+        "pattern_follows_soil_zones": {
+          "weight": 2.0,
+          "reason": "Stress follows soil zone boundaries.",
+          "source": "analyzer"
+        },
+        "soil_low_awc": {
+          "weight": 1.5,
+          "reason": "Available water capacity is low in the top 100 cm.",
+          "source": "nrcs_soil"
+        },
+        "rain_deficit_30d": {
+          "weight": 1.5,
+          "reason": "A dry month hits sandy soil first.",
+          "source": "purdue_water"
+        },
+        "rain_normal_30d": {
+          "weight": 0.8,
+          "reason": "Normal rain keeps sandy soil from stressing.",
+          "source": "purdue_water"
+        }
+      }
+    },
+    "unknown": {
+      "label": "Something else / not yet clear",
+      "prior": 0.1,
+      "crop_adjust": {},
+      "irrigated_adjust": {},
+      "stage_adjust": {},
+      "requires_irrigated": false,
+      "prior_reason": "Hand-set base rate for a flagged anomaly, to be tuned on real examples (docs/data-pipelines.md M4).",
+      "weights": {
+        "no_pattern_found": {
+          "weight": 1.0,
+          "reason": "No recognizable pattern in imagery or context.",
+          "source": "judgment"
+        },
+        "clear_pattern_found": {
+          "weight": 1.5,
+          "reason": "A clear pattern exists that another condition explains.",
+          "source": "judgment"
+        }
+      }
+    }
+  }
+}
