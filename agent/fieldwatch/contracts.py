@@ -182,6 +182,21 @@ class TerrainSummary(Contract):
     source: str = "USGS 3DEP"
 
 
+class WaterContext(Contract):
+    """Mapped surface water around a field: FEMA flood zones, NHD streams, NWI wetlands. Each source is optional;
+    `sources` names what answered (and what failed), so a missing source never reads as 'no water'."""
+
+    floodplain_pct: float | None = Field(default=None, ge=0, le=100,
+                                         description="Share of the field inside a Special Flood Hazard Area; None = FEMA unavailable")
+    flood_zones: list[str] = Field(default_factory=list, description="FEMA zone codes present, e.g. ['AE', 'X']")
+    nearest_stream_m: float | None = Field(default=None, ge=0, description="From the field edge; 0 if one crosses it")
+    nearest_stream_name: str | None = None
+    wetland_pct: float | None = Field(default=None, ge=0, le=100,
+                                      description="Share of the field mapped as wetland (NWI); None = NWI unavailable")
+    wetland_types: list[str] = Field(default_factory=list, description="NWI wetland types present")
+    sources: list[str] = Field(default_factory=list)
+
+
 class WeatherDay(Contract):
     date: ISODate
     precip_mm: float
@@ -260,6 +275,7 @@ class FieldContext(Contract):
     built_at: ISOTime
     soil: SoilProfile | None = None
     terrain: TerrainSummary | None = None
+    water: WaterContext | None = None
     crop_history: dict[str, str] = Field(default_factory=dict, description="year -> crop, from USDA CSB")
     cohort_field_ids: list[str] = Field(default_factory=list)
     county_fips: str | None = None
@@ -758,6 +774,7 @@ FIXTURE_MODELS: dict[str, type[Contract]] = {
     "field_analysis_result": FieldAnalysisResult,
     "field_context": FieldContext,
     "soil_profile": SoilProfile,
+    "water_context": WaterContext,
     "weather_summary": WeatherSummary,
     "hail_report": HailReport,
     "drought_status": DroughtStatus,

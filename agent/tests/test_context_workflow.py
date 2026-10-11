@@ -193,6 +193,7 @@ def offline_context_sources(monkeypatch):
     monkeypatch.setitem(registry.BY_NAME, "get_soil_profile", replace(registry.BY_NAME["get_soil_profile"], fn=profile, stub=False))
     monkeypatch.setattr(context, "get_soil_profile", profile)
     monkeypatch.setattr(context, "get_terrain_summary", lambda field_id: sample.terrain)
+    monkeypatch.setattr(context, "get_water_context", lambda field_id: sample.water)
     monkeypatch.setattr(context, "cached_cohort_field_ids", lambda field_id: sample.cohort_field_ids)
     monkeypatch.setattr(context, "get_crop_context", lambda field_id: {k: getattr(sample,k) for k in ("crop_history", "cohort_field_ids", "county_fips", "stage")})
     monkeypatch.setattr(context, "get_economics", lambda field_id: {k: getattr(sample,k) for k in ("expected_yield_bu_ac", "price_usd_bu", "price_as_of")})
@@ -245,13 +246,14 @@ def test_all_stages_assemble_the_contract_sample(aws):
         getattr(stages, f"{name}_handler")(EVENT)
     item = get_context(aws)
     sample = json.loads((Path(C.__file__).parents[1] / "fixtures/contracts/field_context.json").read_text())
-    for key in ("soil", "terrain", "crop_history", "cohort_field_ids", "county_fips", "expected_yield_bu_ac",
+    for key in ("soil", "terrain", "water", "crop_history", "cohort_field_ids", "county_fips", "expected_yield_bu_ac",
                 "price_usd_bu", "price_as_of", "stage"):
         assert item[key] == sample[key], key
     assert item["disease_reports"][0]["disease"] == "tar spot"
     assert item["baseline"]["cohort_field_ids"] == sample["cohort_field_ids"]
     C.SoilProfile.model_validate(item["soil"])
     C.TerrainSummary.model_validate(item["terrain"])
+    C.WaterContext.model_validate(item["water"])
 
 
 def test_live_registry_is_reported(aws):
@@ -491,7 +493,7 @@ def test_state_machine_per_field_chain_and_catches(machine):
 
     par = inner["BuildContext"]
     assert par["Type"] == "Parallel" and par["ResultPath"] == "$.stages" and par["Next"] == "FinalizeTask"
-    assert len(par["Branches"]) == 6
+    assert len(par["Branches"]) == 7
     seen = set()
     for branch in par["Branches"]:
         task = branch["States"][branch["StartAt"]]
@@ -511,7 +513,7 @@ def test_state_machine_per_field_chain_and_catches(machine):
 def test_stack_wiring(machine):
     _, template, ctx_stack = machine
     template.has_output("StateMachineArn", {})
-    assert len(template.find_resources("AWS::Lambda::Function")) == 8
+    assert len(template.find_resources("AWS::Lambda::Function")) == 9
     handlers = {r["Properties"].get("Handler") or r["Properties"]["ImageConfig"]["Command"][0] for r in template.find_resources("AWS::Lambda::Function").values()}
     assert "cloud.lambdas.context.load_boundary.handler" in handlers and "cloud.lambdas.context.finalize.handler" in handlers
     for attr in ctx_stack.STAGE_LAMBDAS.values():

@@ -568,6 +568,8 @@ class ContextAPI(Protocol):
 
     def get_terrain_summary(self, field_id: str) -> C.TerrainSummary: ...
 
+    def get_water_context(self, field_id: str) -> C.WaterContext: ...
+
     def get_crop_context(self, field_id: str, as_of: str | None = None) -> dict:
         """{crop_history, cohort_field_ids, county_fips, stage}"""
 

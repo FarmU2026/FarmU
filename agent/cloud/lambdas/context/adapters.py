@@ -87,6 +87,10 @@ def get_terrain_summary(field_id):
     return Result(interfaces.context().get_terrain_summary(field_id), False)
 
 
+def get_water_context(field_id):
+    return Result(interfaces.context().get_water_context(field_id), False)
+
+
 def get_crop_context(field_id):
     return Result(interfaces.context().get_crop_context(field_id), False)
 

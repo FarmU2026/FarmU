@@ -6,6 +6,7 @@ Attribute ownership (FieldContext in contracts.py is flat, so these are its top-
 
     soil        -> soil
     terrain     -> terrain
+    water       -> water                                                (FEMA flood zones, NHD streams, NWI wetlands)
     crop        -> crop_history, cohort_field_ids, county_fips, stage   (crop history + same-crop neighbors)
     disease     -> disease_reports                                      (list of DiseaseReport)
     economics   -> expected_yield_bu_ac, price_usd_bu, price_as_of
@@ -54,6 +55,11 @@ def _terrain(event):
     return {"terrain": _dump(res.value)}, res.stub
 
 
+def _water(event):
+    res = adapters.get_water_context(event["field_id"])
+    return {"water": _dump(res.value)}, res.stub
+
+
 def _crop(event):
     res = adapters.get_crop_context(event["field_id"])
     values = res.value
@@ -91,6 +97,7 @@ def _baseline(event):
 STAGES: dict[str, Stage] = {s.name: s for s in [
     Stage("soil", ("soil",), _soil),
     Stage("terrain", ("terrain",), _terrain),
+    Stage("water", ("water",), _water),
     Stage("crop", ("crop_history", "cohort_field_ids", "county_fips", "stage"), _crop),
     Stage("disease", ("disease_reports",), _disease),
     Stage("economics", ("expected_yield_bu_ac", "price_usd_bu", "price_as_of"), _economics),
@@ -136,6 +143,7 @@ def _make_handler(name: str):
 
 soil_handler = _make_handler("soil")
 terrain_handler = _make_handler("terrain")
+water_handler = _make_handler("water")
 crop_handler = _make_handler("crop")
 disease_handler = _make_handler("disease")
 economics_handler = _make_handler("economics")
