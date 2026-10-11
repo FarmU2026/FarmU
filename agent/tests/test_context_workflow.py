@@ -16,6 +16,7 @@ from cloud.lambdas.context import adapters, finalize, geo_lookup, load_boundary,
 from cloud.lambdas.context.common import (BoundaryError, StageError, from_ddb, normalize_crop, to_ddb)
 from cloud.lambdas.context.geometry import normalize_polygon
 from fieldwatch import contracts as C
+from fieldwatch import interfaces
 
 FARM = "farm-1"
 FIELD = "north-pivot"
