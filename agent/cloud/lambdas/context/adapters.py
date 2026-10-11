@@ -6,11 +6,10 @@ their `fn`, and nothing here changes when that happens.
 
 Two things are adapters rather than plain registry calls:
 
-* `baseline()`: Aaron's lane (WS1) has no registry entry for it yet. Interface this adapter expects, so
-  the lane can implement it without touching WS15:
+* `baseline()`: Aaron's lane (WS1), through `fieldwatch.interfaces.AnalysisAPI.build_baseline`:
 
-      fieldwatch.analysis.baseline.build_baseline(field_id: str, polygon: list[list[float]],
-          tile_ids: list[str], crop: str, bucket: str | None) -> dict   # {"key", "seasons", "cohort_field_ids"}
+      fieldwatch.analysis.baseline.build_baseline(*, field_id: str, polygon: list[list[float]],
+          tile_ids: list[str], crop: str, bucket: str | None) -> contracts.FieldBaseline | dict
 
   Until that module exists the adapter falls back to the registry stub (cohort ids from the
   get_field_context sample, no parquet key, seasons []), marked `"stub": true`.
@@ -22,7 +21,6 @@ Two things are adapters rather than plain registry calls:
 """
 from __future__ import annotations
 
-import importlib
 import json
 import logging
 import os
@@ -30,6 +28,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fieldwatch import contracts as C
+from fieldwatch import interfaces
 from fieldwatch.config import FIXTURES
 
 log = logging.getLogger(__name__)
@@ -81,16 +80,13 @@ def get_disease_reports(county_fips: str, crop: str, season: int) -> Result:
 
 
 def baseline(field_id: str, polygon: list, tile_ids: list[str], crop: str) -> Result:
-    try:
-        module = importlib.import_module("fieldwatch.analysis.baseline")
-    except ModuleNotFoundError as exc:
-        if exc.name != "fieldwatch.analysis.baseline":
-            raise  # the module exists but one of its imports is missing (e.g. rasterio): a real failure
-        module = None
-    if module is not None:
-        out = module.build_baseline(field_id=field_id, polygon=polygon, tile_ids=tile_ids, crop=crop,
-                                    bucket=os.environ.get("BUCKET_NAME"))
-        return Result(dict(out), False)
+    """Result.value is a contracts.FieldBaseline as a dict (the stage stores it as FieldContext.baseline)."""
+    build = interfaces.build_baseline_fn()  # None until WS1 lands; a missing dependency of it still raises
+    if build is not None:
+        out = build(field_id=field_id, polygon=polygon, tile_ids=tile_ids, crop=crop,
+                    bucket=os.environ.get("BUCKET_NAME"))
+        value = C.FieldBaseline.model_validate(out.model_dump() if hasattr(out, "model_dump") else dict(out))
+        return Result(value.model_dump(mode="json"), False)
     ctx = get_field_context(field_id)
-    return Result({"key": None, "seasons": [], "cohort_field_ids": list(ctx.value.cohort_field_ids), "stub": True},
-                  True)
+    stub = C.FieldBaseline(cohort_field_ids=list(ctx.value.cohort_field_ids), stub=True)
+    return Result(stub.model_dump(mode="json"), True)
