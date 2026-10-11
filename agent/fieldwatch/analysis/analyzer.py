@@ -18,6 +18,7 @@ from . import render
 from .core import analyze_stacks
 from .grid import Grid, IndexStack, Layers, Pivot, SceneData
 from .indices import compute_indices
+from .layers import LayerProvider, build_layers
 from .loader import SceneLoader, StacLoader
 from .writer import NullWriter, OverlayWriter
 
@@ -113,10 +114,17 @@ def _error(req, code, message, retryable=False, scene_id="none") -> C.FieldAnaly
 
 
 def analyze(request: C.FieldAnalysisRequest, *, loader: SceneLoader | None = None,
-            writer: OverlayWriter | None = None, layers: Layers | None = None) -> C.FieldAnalysisResult:
-    """Analyze one field as of a date. Never raises: failures come back as status="error"."""
+            writer: OverlayWriter | None = None, layers: Layers | None = None,
+            layer_provider="auto") -> C.FieldAnalysisResult:
+    """Analyze one field as of a date. Never raises: failures come back as status="error".
+
+    Context layers: explicit `layers` win; else `layer_provider(req, grid, inside) -> Layers` (None = none).
+    "auto" builds them from the other lanes via interfaces.py, but only on the production path (no injected
+    loader), so fake-loader tests and replays never touch the network. Layer failures never fail the analysis."""
+    if isinstance(layer_provider, str):
+        layer_provider = LayerProvider() if loader is None else None
     try:
-        return _analyze(request, loader or StacLoader(), writer or NullWriter(), layers)
+        return _analyze(request, loader or StacLoader(), writer or NullWriter(), layers, layer_provider)
     except NoScene as e:
         return _error(request, "NO_SCENE", str(e), retryable=False)
     except (OSError, TimeoutError) as e:  # network, COG reads (rasterio's IO errors subclass OSError)
@@ -125,8 +133,11 @@ def analyze(request: C.FieldAnalysisRequest, *, loader: SceneLoader | None = Non
         return _error(request, "ANALYSIS_ERROR", f"{type(e).__name__}: {e}")
 
 
-def _analyze(req: C.FieldAnalysisRequest, loader: SceneLoader, writer: OverlayWriter, layers: Layers | None):
+def _analyze(req: C.FieldAnalysisRequest, loader: SceneLoader, writer: OverlayWriter, layers: Layers | None,
+             layer_provider=None):
     grid, inside = grid_for_polygon(req.polygon)
+    if layers is None and layer_provider is not None:
+        layers = build_layers(layer_provider, req, grid, inside)
     ctx = _Ctx(loader, grid, inside, req)
     as_of = date.fromisoformat(req.as_of)
 
