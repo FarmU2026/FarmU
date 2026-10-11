@@ -414,6 +414,44 @@ def score_ledger(ledger: EvidenceLedger) -> C.ScoreResult:
     return res
 
 
+def score_reasons(ledger: EvidenceLedger, top_n: int = 3) -> dict:
+    """Why the scorer ranked what it did, in the evidence's own plain words (scoring.explain): the reasons that
+    pushed the top condition up and down the most, and the strongest reason each other condition lost out. This is
+    what lets the agent and the farmer-facing text justify a conclusion instead of just quoting a percent."""
+    if not ledger.evidence:
+        return {}
+    crop = ledger.crop if ledger.crop in C.Crop.__args__ else "other"
+    try:
+        detail = scoring.explain(C.ScoreRequest(investigation_id=ledger.investigation_id, crop=crop,
+                                                stage=ledger.stage, irrigated=ledger.irrigated,
+                                                evidence=list(ledger.evidence)))
+        labels = scoring.load_catalog().conditions
+    except Exception:  # noqa: BLE001 - reasons are a nice-to-have; the score itself already succeeded
+        log.warning("could not explain the score", exc_info=True)
+        return {}
+    if not detail:
+        return {}
+
+    def plain(text: str) -> str:
+        return " ".join(str(text).split())[:160]
+
+    ranked = sorted(detail.items(), key=lambda kv: kv[1]["probability"], reverse=True)
+    top_id, top = ranked[0]
+    out = {
+        "top_condition": top_id,
+        "for": [plain(a["reason"]) for a in top["applied"] if a["delta_log_odds"] > 0][:top_n],
+        "against": [plain(a["reason"]) for a in top["applied"] if a["delta_log_odds"] < 0][:2],
+        "ruled_out": [],
+    }
+    for cid, d in ranked[1:]:
+        down = [a for a in d["applied"] if a["delta_log_odds"] < 0]
+        if down and cid != "unknown" and (d["status"] == "ruled_out" or d["probability"] < 0.2):
+            out["ruled_out"].append({"condition": labels[cid].label if cid in labels else cid,
+                                     "reason": plain(down[0]["reason"])})
+    out["ruled_out"] = out["ruled_out"][:3]
+    return out
+
+
 def score_payload(res: C.ScoreResult) -> dict:
     """What the supervisor reads: scorer probabilities as whole percents, ranked, and the plain 'how sure'."""
     ranked = sorted(res.hypotheses, key=lambda h: h.probability, reverse=True)
@@ -453,7 +491,7 @@ def build_scoring_tools(ledger: EvidenceLedger, context: dict | None = None) -> 
         # watch next to a ring, say, needs the specialists)
         ledger.fast_path = (probs[0] >= FAST_PATH_THRESHOLD and probs[0] - probs[1] >= CLOSE_CALL
                             and probs[1] <= scoring.LIKELY_ABOVE)
-        return json.dumps({**payload, "fast_path": ledger.fast_path})
+        return json.dumps({**payload, "why": score_reasons(ledger), "fast_path": ledger.fast_path})
 
     @tool
     def score_hypotheses(crop: str = "", stage: str = "", irrigated: bool | None = None) -> str:
@@ -466,7 +504,8 @@ def build_scoring_tools(ledger: EvidenceLedger, context: dict | None = None) -> 
             ledger.stage = stage
         if irrigated is not None:
             ledger.irrigated = irrigated
-        return json.dumps({**score_payload(score_ledger(ledger)), "evidence_count": len(ledger.evidence)})
+        return json.dumps({**score_payload(score_ledger(ledger)), "why": score_reasons(ledger),
+                           "evidence_count": len(ledger.evidence)})
 
     @tool
     def estimate_impact(field_id: str, condition: str, affected_acres: float = 0.0, severity: str = "medium",
@@ -604,7 +643,9 @@ For the field you are asked about (call list_fields once to get its id, then use
    tool (create_work_order or create_scout_pin), never by just asking in text: the call is what pauses
    for the farmer's YES. If the field is genuinely fine, skip the action and say so.
 6. Then produce the diagnosis. Keep "what" and "why" to one short sentence each; the farmer reads this
-   as a text message.
+   as a text message. Build "why" from the `why.for` reasons score_hypotheses returned (the evidence that
+   actually moved the score), and put `why.ruled_out` conditions with their reason in "ruled_out", so the
+   farmer sees what we checked, not just a conclusion.
 
 Use send_farmer_message only to text someone on the farm directly (for example an urgent heads-up); the
 question for the farmer and your final diagnosis are sent for you. Farmer-facing text is plain ASCII: no em

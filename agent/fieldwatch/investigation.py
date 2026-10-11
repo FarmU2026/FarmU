@@ -47,6 +47,7 @@ class Step:
     diagnosis: Diagnosis | None = None
     interrupt_id: str | None = None
     timeline: list[dict] | None = None
+    explanation: dict | None = None  # scorer's top condition, reasons and impact (see `explanation()`)
 
 
 # ---------------------------------------------------------------- sessions and agent wiring
@@ -98,19 +99,65 @@ def _build(timeline: ToolTimeline, sm, read_only: bool = False):
     return build_supervisor(timeline, session_manager=sm, hooks=[budget], **extra)
 
 
-def _to_step(result, timeline: ToolTimeline, approved: bool | None = None) -> Step:
+def explanation(agent) -> dict | None:
+    """What the scorer concluded so far and WHY, from the agent's own tool results (session-persisted, so this works
+    after a resume too): top condition + label, how_sure, percents, the reasons that moved the score (`why`) and the
+    impact. Numbers come only from the scorer and impact tools, never the LLM. None before anything was scored."""
+    from .agents import _tool_payloads  # same parser DiagnosisGuard uses
+    from .scoring import load_catalog
+
+    messages = getattr(agent, "messages", None) or []
+    scores = [p for p in _tool_payloads(messages, "score_hypotheses") if p.get("hypotheses")]
+    if not scores:
+        return None
+    last = scores[-1]
+    top = last.get("top_condition") or last["hypotheses"][0].get("condition")
+    try:
+        label = load_catalog().conditions[top].label
+    except Exception:  # noqa: BLE001 - an unknown condition just reads as its id
+        label = str(top or "").replace("_", " ")
+    out = {"top_condition": top, "label": label, "how_sure": last.get("how_sure"),
+           "hypotheses": [{"condition": h.get("condition"), "percent": h.get("percent")} for h in last["hypotheses"]][:4],
+           "why": last.get("why") or {}}
+    impacts = [p for p in _tool_payloads(messages, "estimate_impact") if "low_usd" in p and "high_usd" in p]
+    if impacts:
+        out["impact"] = {"acres": impacts[-1].get("affected_acres"), "low_usd": round(impacts[-1]["low_usd"]),
+                         "high_usd": round(impacts[-1]["high_usd"])}
+    return out
+
+
+def _finding(expl: dict | None) -> str:
+    """The YES / NO text's lead: likely cause (how sure), the top reasons, acres and dollars. Plain ASCII, short."""
+    if not expl or not expl.get("label") or expl.get("top_condition") == "unknown":
+        return ""
+    parts = [f"Likely {expl['label'].lower()}" + (f" ({expl['how_sure']})." if expl.get("how_sure") else ".")]
+    reasons = [r.rstrip(".") for r in (expl.get("why") or {}).get("for", [])[:2] if r]
+    if reasons:
+        parts.append("Why: " + "; ".join(reasons) + ".")
+    imp = expl.get("impact") or {}
+    if imp.get("high_usd", 0) > 0:
+        parts.append((f"About {imp['acres']:.0f} acres, " if imp.get("acres") else "") +
+                     f"${imp['low_usd']:,}-${imp['high_usd']:,} at risk.")
+    return memory._plain(" ".join(parts), 360)
+
+
+def _to_step(result, timeline: ToolTimeline, approved: bool | None = None, agent=None) -> Step:
+    expl = explanation(agent) if agent is not None else None
     if result.stop_reason == "interrupt" and result.interrupts:
         it = result.interrupts[0]
         reason = it.reason if isinstance(it.reason, dict) else {"summary": str(it.reason)}
+        finding = _finding(expl)
         return Step(
             status="waiting_for_farmer",
-            text=f"{reason.get('summary')} YES / NO",
+            # Lead with what we found and why, then the proposed action: the farmer decides from this one text.
+            text=f"{finding} {reason.get('summary')}? YES / NO".strip() if finding else f"{reason.get('summary')} YES / NO",
             interrupt_id=it.id,
             timeline=timeline.events,
+            explanation=expl,
         )
     diag = result.structured_output
     text = diag.to_text(approved) if diag else re.sub(r"<thinking>.*?</thinking>\s*", "", str(result), flags=re.S).strip()
-    return Step(status="done", text=text, diagnosis=diag, timeline=timeline.events)
+    return Step(status="done", text=text, diagnosis=diag, timeline=timeline.events, explanation=expl)
 
 
 def start(investigation_id: str, field_name: str, emit=print_event, context: str = "") -> Step:
@@ -124,7 +171,7 @@ def start(investigation_id: str, field_name: str, emit=print_event, context: str
         limits=LIMITS,
         structured_output_model=Diagnosis,
     )
-    return _to_step(result, timeline)
+    return _to_step(result, timeline, agent=agent)
 
 
 MAX_ANSWER = 480  # one SMS-sized message (contracts.SendMessageRequest.body)
@@ -184,7 +231,7 @@ def reply(investigation_id: str, interrupt_id: str, farmer_text: str, emit=print
         limits=LIMITS,
         structured_output_model=Diagnosis,
     )
-    return _to_step(result, timeline, approved=farmer_text.strip().upper().startswith("Y"))
+    return _to_step(result, timeline, approved=farmer_text.strip().upper().startswith("Y"), agent=agent)
 
 
 def to_agent_step(step: Step, investigation_id: str) -> C.AgentStep:
@@ -427,15 +474,17 @@ def run_request(req: C.StartInvestigation | C.ResumeInvestigation, recorder: Rec
     # the question, the final message or the answer; a direct answer to the farmer's text skips quiet hours and the daily cap
     sent = deliver(rec, step, urgency="urgent") if asking else deliver(rec, step)
     message = {"message_id": sent.message_id, "message_sent_at": _now()} if sent else {}
+    # keep the reasons with the record, so the report, the farm payload and a later "why?" question can use them
+    why = {"explanation_json": json.dumps(step.explanation)} if step.explanation else {}
     if step.status == "waiting_for_farmer":
-        rec.set_status("awaiting_reply", pending_interrupt_id=step.interrupt_id, last_text=step.text, **message)
+        rec.set_status("awaiting_reply", pending_interrupt_id=step.interrupt_id, last_text=step.text, **why, **message)
         rec.progress("supervisor", "waiting", "Waiting for the farmer's answer")
     else:
         diag = step.diagnosis
         rec.set_status(
             "concluded", last_text=step.text,
             diagnosis_json=json.dumps(out.diagnosis) if out.diagnosis else None,
-            condition=(diag.condition or infer_condition(diag)) if diag else None, **message,
+            condition=(diag.condition or infer_condition(diag)) if diag else None, **why, **message,
         )
         if diag:
             rec.concluded(diag, message_id=sent.message_id if sent else None)
@@ -478,6 +527,25 @@ def _about_context(rec: Recorder, req: C.StartInvestigation) -> tuple[str, set[i
             parts.append("scored: " + ", ".join(f"{h.get('condition')} {round(float(h['probability']) * 100)}%"
                                                 for h in diag["hypotheses"] if "probability" in h))
         lines.append("Its diagnosis: " + "; ".join(parts))
+    try:
+        expl = json.loads(item.get("explanation_json") or "null")
+    except ValueError:
+        expl = None
+    if isinstance(expl, dict):  # the scorer's reasons, stored at the pause and at the end (see `explanation()`)
+        allowed |= {int(h["percent"]) for h in expl.get("hypotheses") or [] if h.get("percent") is not None}
+        why = expl.get("why") or {}
+        parts = [f"leading cause: {expl.get('label')} ({expl.get('how_sure') or 'unscored'})"]
+        if why.get("for"):
+            parts.append("evidence for it: " + memory._plain("; ".join(why["for"]), 400))
+        if why.get("against"):
+            parts.append("evidence against it: " + memory._plain("; ".join(why["against"]), 240))
+        if why.get("ruled_out"):
+            parts.append("ruled out: " + memory._plain("; ".join(f"{r['condition']} ({r['reason']})"
+                                                                  for r in why["ruled_out"]), 400))
+        if expl.get("hypotheses"):
+            parts.append("scored: " + ", ".join(f"{h['condition']} {h['percent']}%" for h in expl["hypotheses"]
+                                                if h.get("percent") is not None))
+        lines.append("Why we concluded it (from the scorer; explain this when the farmer asks why): " + "; ".join(parts))
     return "\n".join(lines), allowed
 
 
