@@ -121,8 +121,9 @@ class Api(Stack):
         t = data.tables
         routes, handlers = _load_routes()
         self.functions = {}
+        api_routes: list = []
         for group, keys in routes.items():
-            cid = "".join(p.capitalize() for p in group.split("_")) + "Fn"
+            cid ="".join(p.capitalize() for p in group.split("_")) + "Fn"
             fn = python_lambda(self, cid, handler=handlers[group], environment=env,
                                timeout_s=15 if group == "sms_inbound" else 30, memory_mb=512,
                                reserved_concurrency=10)
@@ -130,7 +131,8 @@ class Api(Stack):
             integration = HttpLambdaIntegration(f"{cid}Integration", fn)
             for key in keys:
                 method, path = key.split(" ", 1)
-                self.http_api.add_routes(path=path, methods=[apigw.HttpMethod[method]], integration=integration)
+                api_routes += self.http_api.add_routes(path=path, methods=[apigw.HttpMethod[method]],
+                                                       integration=integration)
 
             # --- least privilege per group ---
             data.bus.grant_put_events_to(fn)
@@ -174,6 +176,10 @@ class Api(Stack):
         stage.route_settings = {
             key: {"ThrottlingRateLimit": rate, "ThrottlingBurstLimit": burst}
             for key, (rate, burst) in ROUTE_THROTTLES.items()}
+        # Route settings name routes by key, so the stage must update after every route exists. Without this a
+        # new throttled route (Oct 10: POST /api/farms/{farm_id}/fields) failed the deploy and then the rollback.
+        for route in api_routes:
+            stage.node.add_dependency(route)
 
         CfnOutput(self, "ApiUrl", value=self.http_api.api_endpoint, description="Base URL of the FieldWatch web API")
         CfnOutput(self, "SmsWebhookUrl", value=f"{self.http_api.api_endpoint}/sms/inbound",
