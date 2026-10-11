@@ -438,7 +438,8 @@ class CloudRunner:
     def _overview(self, farm_id: str, field_id: str) -> tuple[set[str], list[dict], tuple]:
         """(ids of open investigations on the field, those rows, the field's (latest_scene_date, latest_score))."""
         data = self._must("overview", "GET", f"/v1/farms/{farm_id}/overview")
-        rows = [i for i in data.get("open_investigations", []) if i.get("field_id") == field_id]
+        rows = [i for i in data.get("open_investigations", [])
+                if i.get("field_id") == field_id and i.get("kind") != "question"]  # question runs are not investigations
         row = next((f for f in data.get("fields", []) if f.get("field_id") == field_id), {})
         return {str(i.get("investigation_id")) for i in rows}, rows, (row.get("latest_scene_date"), row.get("latest_score"))
 

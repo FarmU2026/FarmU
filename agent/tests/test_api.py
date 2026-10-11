@@ -138,7 +138,8 @@ def test_ask_emits_start_investigation(aws):
     assert code == 200 and farm["investigation_id"].startswith("inv_")
     (dt, detail), = [e for e in aws.events if e[0] == "StartInvestigation"]
     assert detail == {"schema_version": "1", "action": "start", "investigation_id": farm["investigation_id"],
-                      "farm_id": FARM, "field": FIELD, "anomaly": None}
+                      "farm_id": FARM, "field": FIELD, "anomaly": None,
+                      "question": None, "about_investigation_id": None}
 
 
 def test_ask_unknown_field(aws):

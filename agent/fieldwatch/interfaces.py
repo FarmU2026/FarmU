@@ -415,6 +415,7 @@ class InvestigationRecord(Row):
     anomaly_id: str | None = None
     replay: bool = False
     person_id: str | None = None
+    kind: str | None = None  # "question": a run that answers a farmer's free-text message; absent: an investigation
     pending_interrupt_id: str | None = None
     handled_keys: set[str] | None = None
     progress_seq: int | None = None

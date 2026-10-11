@@ -53,12 +53,14 @@ class Agent(Stack):
             environment={
                 "FIELDWATCH_RUNTIME_ARN_PARAM": RUNTIME_ARN_PARAM,
                 "FIELDWATCH_INVESTIGATIONS_TABLE": "fw-investigations",  # fixed name (data_plane.py)
+                "FIELDWATCH_FIELDS_TABLE": "fw-fields",  # question runs pick the farm's field from it
             },
             retry_attempts=2,
             max_event_age=Duration.hours(6),
             dead_letter_queue=self.dlq,
         )
         data.tables["fw-investigations"].grant_read_write_data(self.starter)
+        data.tables["fw-fields"].grant_read_data(self.starter)
         self.starter.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock-agentcore:InvokeAgentRuntime"],
             resources=[f"arn:aws:bedrock-agentcore:{self.region}:{self.account}:runtime/*"],
