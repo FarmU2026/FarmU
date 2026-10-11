@@ -306,8 +306,11 @@
     ds.forEach((d, n) => {
       if (lastFor[String(d.field_name).toLowerCase()] !== n) return;
       const newest = n === ds.length - 1;
-      const id = newest ? ((f.pending && f.pending.investigation_id) || lastInvId(th) || "latest") : "diag-" + n;
+      // cloud entries carry their own investigation_id; the local harness does not (synthetic ids)
+      const id = d.investigation_id || (newest ? ((f.pending && f.pending.investigation_id) || lastInvId(th) || "latest") : "diag-" + n);
       const i = getInv(id);
+      if (d.field_id && !i.fieldId) i.fieldId = d.field_id;
+      serverFacts(i, d);
       if (i.rt) return;
       const hyps = (d.hypotheses || []).length ? d.hypotheses : (d.ruled_out || []).map((c) => ({ condition: c, status: "ruled_out" }));
       i.diag = d; i.hyps = hyps; i.fieldName = d.field_name; i.updated = i.updated || n + 1;
@@ -317,8 +320,9 @@
         impact: d.dollars_high ? { low_usd: d.dollars_low, high_usd: d.dollars_high, affected_acres: d.affected_acres } : null,
         action: d.action_detail || d.recommended_action ? { summary: d.action_detail || "", type: d.recommended_action } : null,
       };
-      if (newest) {
-        i.waiting = !!f.pending;
+      if (newest) i.waiting = !!f.pending;
+      if ("decision" in d) i.decision = DECIDED.includes(d.decision) ? d.decision : ""; // the server's word beats guessing from the thread
+      else if (newest) {
         if (!f.pending) {
           const mine = th.filter((m) => m.who === "farmer");
           const last = mine.length ? String(mine[mine.length - 1].text || "") : "";
@@ -326,6 +330,16 @@
         } else i.decision = "";
       }
     });
+  }
+  // From the cloud payload (#52): links, the farmer's decision and the work order's state. Safe to apply even when the
+  // live feed owns the investigation: it only adds facts the feed does not carry or that are final.
+  const DECIDED = ["approved", "declined", "expired"];
+  function serverFacts(i, d) {
+    const r = safeUrl(d.report_url), w = safeUrl(d.work_order_url);
+    if (r) i.reportUrl = r;
+    if (w) i.workUrl = w;
+    if (d.work_order_status) { i.workStatus = d.work_order_status; i.doneAt = d.completed_at || ""; }
+    if (i.rt && DECIDED.includes(d.decision)) i.decision = d.decision;
   }
   const lastInvId = (t) => { for (let k = (t || []).length - 1; k >= 0; k--) if (t[k].investigation_id) return t[k].investigation_id; return null; };
 
@@ -494,9 +508,75 @@
 
   function imgSrc(f, kind) {
     if (demo) return kind === "truecolor" ? "fixtures/true_color.svg" : "fixtures/health.svg";
-    return `${apiBase()}/api/farms/${encodeURIComponent(farm.farm_id)}/fields/${encodeURIComponent(f.id)}/${kind}.png?v=${encodeURIComponent((f.stats && f.stats.scene_date) || "")}`;
+    return `${apiBase()}/api/farms/${encodeURIComponent(farm.farm_id)}/fields/${encodeURIComponent(f.id)}/${kind}.png?v=${encodeURIComponent(f.overlay_date || (f.stats && f.stats.scene_date) || "")}`;
   }
   const lastPass = (f) => (f.stats && f.stats.scene_date) || f.last_scene_date || "";
+
+  // ---------- "What FieldWatch sees": one picture area, a few views of the same field ----------
+  // Which views exist comes from the field's overlay_kinds (PR #55). Older servers send none, so we show the two pictures
+  // that always existed. Dates for the captions come from field.comparison; a missing piece just drops its sentence.
+  const SEE_VIEWS = [
+    { kind: "true_color", label: "Satellite", alt: (n) => `Satellite photo of ${n}` },
+    { kind: "health", label: "Crop health", alt: (n) => `Crop health of ${n}: green is strong, red and brown are weak` },
+    { kind: "departure", label: "Compared to normal", alt: (n) => `${n} compared with normal: red areas are below normal, blue areas are above` },
+    { kind: "change", label: "Change since last pass", alt: (n) => `Change in ${n} since the last pass: red areas got less green, blue areas got more green` },
+    { kind: "normal", label: "Normal for this week", alt: (n) => `What is normal for ${n} this week: green is strong, red and brown are weak` },
+    { kind: "mask", label: "Flagged areas", alt: (n) => `Satellite photo of ${n} with the problem areas in red` },
+  ];
+  const seeChoice = {};        // field id -> the view the farmer picked
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const shortDate = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || "")); return m && MONTHS[+m[2] - 1] ? `${MONTHS[+m[2] - 1]} ${+m[3]} ${m[1]}` : ""; };
+  const listWords = (a) => (a.length < 2 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1]);
+  const inRecCard = (f) => fieldTone(f) === "bad" && !!bestInv(f);
+
+  function seeViews(f) {
+    const listed = Array.isArray(f.overlay_kinds) && f.overlay_kinds.length ? f.overlay_kinds.map(String) : null;
+    if (!listed && !f.stats) return [];
+    const have = listed || ["true_color", "health"], c = f.comparison || {};
+    return SEE_VIEWS.filter((v) => have.includes(v.kind)
+      && !(v.kind === "change" && "previous_date" in c && !c.previous_date)   // no earlier clear pass: nothing to compare
+      && !(v.kind === "mask" && !have.includes("true_color")));
+  }
+  function seeCurrent(f, views) {
+    const want = seeChoice[f.id] || params.get("see") || (fieldTone(f) === "bad" ? "departure" : "true_color");
+    return views.find((v) => v.kind === want) || views.find((v) => v.kind === "true_color") || views[0];
+  }
+  function seeSrc(f, kind) {
+    const listed = Array.isArray(f.overlay_kinds) && f.overlay_kinds.length;
+    if (demo) return listed ? `fixtures/overlays/${kind}.png` : kind === "true_color" ? "fixtures/true_color.svg" : "fixtures/health.svg";
+    return imgSrc(f, !listed && kind === "true_color" ? "truecolor" : kind); // the local harness only knows "truecolor"
+  }
+  function seeCaption(f, kind) {
+    const c = f.comparison || {}, when = c.scene_date || f.overlay_date || lastPass(f);
+    const base = (c.baseline_dates || []).map(shortDate).filter(Boolean);
+    if (kind === "true_color") return when ? `Satellite pass, ${passDate(when)}` : "Satellite photo of the field";
+    if (kind === "health") return `Crop health${when ? " on " + passDate(when) : ""}`;
+    if (kind === "departure") return base.length ? `Compared with this field on ${listWords(base)}` : "Compared with this field in earlier years";
+    if (kind === "change") return shortDate(c.previous_date) ? `Change since ${shortDate(c.previous_date)}` : "Change since the last clear pass";
+    if (kind === "normal") return base.length ? `What is normal for this week, from this field on ${listWords(base)}` : "What is normal for this field at this time of year";
+    return "Problem areas in red, on the satellite photo";
+  }
+  function seeLegend(kind) {
+    const bar = (cls, ends) => `<div class="scale"><i class="${cls}" aria-hidden="true"></i><div class="ends">${ends.map((t) => `<span>${esc(t)}</span>`).join("")}</div></div>`;
+    const gray = `<p class="meta">Gray = clouds or no clear view.</p>`;
+    if (kind === "departure") return bar("sc-div", ["Below normal", "Normal", "Above normal"]) + gray;
+    if (kind === "change") return bar("sc-div", ["Less green", "No change", "More green"]) + gray;
+    if (kind === "health" || kind === "normal") return bar("sc-health", ["Weak crop", "Strong crop"]);
+    return "";
+  }
+  // ctx ("rec" or "row") says which copy of the panel a button belongs to, so focus can return to the right one.
+  function seeHtml(f, ctx) {
+    const views = seeViews(f); if (!views.length) return "";
+    const cur = seeCurrent(f, views), name = f.name, kind = cur.kind;
+    const img = (k, cls) => `<img${cls ? ` class="${cls}"` : ""} loading="lazy" alt="${esc(SEE_VIEWS.find((v) => v.kind === k).alt(name))}" src="${esc(seeSrc(f, k))}" onerror="this.parentNode.classList.add('fail')">`;
+    return `<section class="see" aria-label="What FieldWatch sees in ${esc(name)}">
+      <h4 class="see-h">What FieldWatch sees</h4>
+      ${views.length > 1 ? `<div class="seg" role="group" aria-label="Choose a view of ${esc(name)}">${views.map((v) => `<button type="button" data-see="${esc(v.kind)}" data-sf="${esc(f.id)}" data-ctx="${ctx}" aria-pressed="${v.kind === kind}">${esc(v.label)}</button>`).join("")}</div>` : ""}
+      <figure class="seefig"><div class="seeimg">${img(kind === "mask" ? "true_color" : kind)}${kind === "mask" ? img("mask", "over") : ""}</div>
+        <figcaption>${esc(seeCaption(f, kind))}</figcaption></figure>
+      ${seeLegend(kind)}
+    </section>`;
+  }
 
   const CROPS = ["corn", "soybeans", "wheat", "milo", "alfalfa"];
   const passDate = (d) => (d ? FW.niceDate(d) : "");
@@ -510,10 +590,10 @@
       h += `<div class="detail">`;
       if (!s) h += `<p class="quiet">No clear pass yet. We will check again when the sky is clear.</p>`;
       else {
-        h += `<p class="meta">Weakest in the ${esc(s.weakest_area)}. ${Math.round((s.share_of_field_below_0_3 || 0) * 100)}% of the field looks bare or stressed.</p>
-          <div class="pair"><figure><img loading="lazy" alt="Satellite photo of ${esc(f.name)}" src="${esc(imgSrc(f, "truecolor"))}" onerror="this.style.visibility='hidden'"><figcaption>What the satellite sees</figcaption></figure>
-          <figure><img loading="lazy" alt="Crop health of ${esc(f.name)}" src="${esc(imgSrc(f, "health"))}" onerror="this.style.visibility='hidden'"><figcaption>Crop health: green strong, brown weak</figcaption></figure></div>`;
+        h += `<p class="meta">Weakest in the ${esc(s.weakest_area)}. ${Math.round((s.share_of_field_below_0_3 || 0) * 100)}% of the field looks bare or stressed.</p>`;
       }
+      // a flagged field already shows its pictures in its card under "What to do"; do not show them twice
+      h += inRecCard(f) ? `<p class="meta see-note">Pictures of this field are in its card at the top of this page, under What to do.</p>` : seeHtml(f, "row");
       h += `<div class="actions"><button class="btn secondary" type="button" data-ask="${esc(f.id)}" ${askBusy ? "disabled" : ""}>${askBusy === f.id ? "Asking..." : "Ask FieldWatch about this field"}</button></div>
         <div class="editgrid"><div><label for="ename">Name</label><input id="ename" value="${esc(f.name)}" autocomplete="off"></div>
         <div><label for="ecrop">Crop</label><select id="ecrop">${CROPS.concat(CROPS.includes(f.crop) ? [] : [f.crop]).map((c) => `<option${c === f.crop ? " selected" : ""}>${esc(c)}</option>`).join("")}</select></div></div>
@@ -553,7 +633,8 @@
     const a = i.concluded && i.concluded.action, type = a && (a.action_type || a.type);
     if (type === "none") return "none";
     if (i.decision === "declined") return "declined";
-    if (i.decision === "approved" || i.workUrl) return "approved";
+    if (i.decision === "expired") return "expired";
+    if (i.decision === "approved" || i.workUrl) return i.workStatus === "done" ? "done" : "approved";
     return "waiting";
   }
   function recHtml(f, i) {
@@ -561,11 +642,12 @@
     const where = i.where || (f.stats && f.stats.weakest_area ? `Weakest in the ${f.stats.weakest_area}.` : "");
     const share = f.stats && f.stats.share_of_field_below_0_3 ? `About ${Math.round(f.stats.share_of_field_below_0_3 * 100)}% of the field looks bare or stressed.` : "";
     const why = whyText(i), sure = sureText(i);
-    const stateWord = { waiting: "Waiting for your YES", approved: "Approved", declined: "You said no", none: "" }[st];
+    const stateWord = { waiting: "Waiting for your YES", approved: "Approved", done: `Done${i.doneAt ? " " + passDate(i.doneAt) : ""}`, declined: "You said no", expired: "No answer in time, request closed", none: "" }[st];
     const row = (k, v) => (v ? `<div><dt>${k}</dt><dd>${v}</dd></div>` : "");
     let h = `<article class="rec" aria-label="${esc(f.name)}">
       <div class="rec-top"><h3>${esc(f.name)}</h3>${statusHtml("bad")}</div>
       <p class="rec-what">${esc(c.condition ? condition(c.condition) : "Something looks wrong")}${c.summary ? `. ${esc(c.summary)}` : "."}</p>
+      ${seeHtml(f, "rec")}
       <dl class="facts">
         ${row("Where", esc([where, share].filter(Boolean).join(" ")))}
         ${row("Why we think so", esc(why))}
@@ -592,7 +674,7 @@
       const t = fieldTone(f), i = t === "bad" ? bestInv(f) : null;
       if (i) urgent.push({ f, i }); else if (t === "busy") busy.push(f); else if (t === "wait") waiting.push(f); else calm.push(f);
     });
-    const rank = (x) => ({ waiting: 0, approved: 1, declined: 2, none: 3 }[recState(x.i)]);
+    const rank = (x) => ({ waiting: 0, approved: 1, expired: 2, declined: 2, done: 3, none: 3 }[recState(x.i)]);
     const money = (x) => (x.i.concluded.impact && x.i.concluded.impact.high_usd) || 0;
     urgent.sort((a, b) => rank(a) - rank(b) || money(b) - money(a));
     const n = urgent.length;
@@ -642,6 +724,13 @@
   }
   $("v-plots").addEventListener("click", async (e) => {
     const t = e.target;
+    const see = t.closest("[data-see]");
+    if (see) {
+      seeChoice[see.dataset.sf] = see.dataset.see; render();
+      const again = document.querySelector(`#v-plots [data-see="${see.dataset.see}"][data-sf="${CSS.escape(see.dataset.sf)}"][data-ctx="${see.dataset.ctx}"]`);
+      if (again) again.focus();
+      return;
+    }
     const sel = t.closest("[data-sel]"); if (sel) return select(sel.dataset.sel);
     const show = t.closest("[data-show]"); if (show) { select(show.dataset.show, true); $("mapSlot").scrollIntoView({ block: "nearest", behavior: "smooth" }); return; }
     const f = (id) => fieldsOf().find((x) => x.id === id);

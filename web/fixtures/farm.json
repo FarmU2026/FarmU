@@ -31,6 +31,38 @@
         ]
       ],
       "last_scene_date": "2026-07-18",
+      "overlay_kinds": [
+        "true_color",
+        "health",
+        "mask",
+        "departure",
+        "change",
+        "normal"
+      ],
+      "overlay_date": "2026-07-18",
+      "comparison": {
+        "scene_date": "2026-07-18",
+        "previous_date": "2026-07-08",
+        "baseline_dates": [
+          "2023-07-18",
+          "2024-07-25",
+          "2025-07-19"
+        ],
+        "baseline_method": "median",
+        "median_departure_ndvi": -0.02,
+        "departure_scale": {
+          "stat": "z",
+          "vmin": -3.0,
+          "vmax": 3.0,
+          "unit": "standard deviations from this field's normal"
+        },
+        "change_scale": {
+          "stat": "ndvi_diff",
+          "vmin": -0.25,
+          "vmax": 0.25,
+          "unit": "NDVI change since the previous clear pass"
+        }
+      },
       "stats": {
         "scene_date": "2026-07-18",
         "cloud_cover_pct": 3,
