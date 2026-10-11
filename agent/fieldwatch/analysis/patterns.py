@@ -70,7 +70,11 @@ def pivot_scores(mask: np.ndarray, grid: Grid, center_lonlat, radius_m: float) -
     # wedge: few degrees, long in radius
     arc = _arc_covering(ang)
     span = (np.percentile(r, 90) - np.percentile(r, 10)) / (0.5 * radius_m)
-    wedge = _clip01(1 - arc / 150.0) * _clip01(span)
+    # a sector runs along the radius; a compact blob (other crop, waterway end, low spot) that merely sits in a
+    # narrow angle far from the pivot does not. Real irregular regions scored wedge 0.73-0.83 before this factor.
+    tangential = max(float(np.median(r)) * math.radians(arc), 1.0)
+    radial = float(np.percentile(r, 95) - np.percentile(r, 5))
+    wedge = _clip01(1 - arc / 150.0) * _clip01(span) * _clip01((radial / tangential - 0.7) / 1.0)
     return ring, wedge
 
 
