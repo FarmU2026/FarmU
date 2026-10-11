@@ -1,0 +1,18 @@
+{
+  "floodplain_pct": 62.5,
+  "flood_zones": [
+    "AE",
+    "X"
+  ],
+  "nearest_stream_m": 0.0,
+  "nearest_stream_name": "Cow Creek",
+  "wetland_pct": 4.2,
+  "wetland_types": [
+    "Freshwater Emergent Wetland"
+  ],
+  "sources": [
+    "FEMA NFHL flood zones",
+    "USGS NHD streams",
+    "USFWS NWI wetlands"
+  ]
+}

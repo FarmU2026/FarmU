@@ -5,7 +5,7 @@ A Step Functions STANDARD state machine, started by the web API after fields are
     input   {schema_version: "1", farm_id, field_ids: [..]}
     Map over field_ids (max concurrency 5), per field:
         LoadBoundary  -> normalize polygon, acres, centroid, Sentinel-2 tiles -> fw-tile-index, status=building
-        Parallel      -> soil | terrain | crop | disease | economics | baseline   (each with its own Catch)
+        Parallel      -> soil | terrain | water | crop | disease | economics | baseline   (each with its own Catch)
         Finalize      -> status ready / partial / failed, fw-fields.status
     output  {farm_id, results: [{field_id, status, failed_stages, stub_stages}]}
 
@@ -26,14 +26,18 @@ from .common import geo_lambda, python_lambda
 BASELINE_USES_GEO_IMAGE = True
 MAP_CONCURRENCY = 5
 HANDLER_PREFIX = "cloud.lambdas.context"
-# One bundle for all eight Lambdas (CDK caches the bundle by source path, so per-function lists would not
-# be honored): shapely for LoadBoundary on top of common.BASE_REQUIREMENTS.
+NASS_KEY_PARAM = "/fieldwatch/nass-api-key"  # SecureString (aws/ssm key), created by hand; read by the economics stage
+# Requirements for the zip Lambdas (LoadBoundary, water, disease, economics, Finalize) on top of
+# common.BASE_REQUIREMENTS: shapely for boundaries and the water stage (numpy comes with it). Bundles are per
+# requirement set (the list is part of the bundling command, see common.python_lambda), so a function that
+# needs more than this would pass its own list.
 REQUIREMENTS = ["shapely>=2"]
 
 # stage name -> handler attribute in cloud.lambdas.context.stages
 STAGE_LAMBDAS = {
     "soil": "soil_handler",
     "terrain": "terrain_handler",
+    "water": "water_handler",
     "crop": "crop_handler",
     "disease": "disease_handler",
     "economics": "economics_handler",
@@ -77,6 +81,13 @@ class Context(Stack):
                 data.bucket.grant_read_write(fn, "context/*")
             if name == "crop":
                 data.bucket.grant_read_write(fn, "static/csb/*")
+            if name == "economics":
+                # NASS Quick Stats key: economics() reads it from SSM (decrypted with the AWS-managed aws/ssm key,
+                # so no KMS grant) and falls back to the planning defaults if it can't.
+                fn.add_environment("NASS_API_KEY_PARAM", NASS_KEY_PARAM)
+                fn.add_to_role_policy(iam.PolicyStatement(
+                    actions=["ssm:GetParameter"],
+                    resources=[f"arn:aws:ssm:{self.region}:{self.account}:parameter{NASS_KEY_PARAM}"]))
             stage_fns[name] = fn
 
         finalize = python_lambda(self, "Finalize", handler=f"{HANDLER_PREFIX}.finalize.handler",

@@ -78,6 +78,7 @@ class Ssm:
     """SSM parameters. SecureStrings are created by hand (CloudFormation can't create them)."""
 
     LINK_SIGNING_KEY = "/fieldwatch/link-signing-key"  # SecureString: HMAC key for farmer links + dashboard token
+    NASS_API_KEY = "/fieldwatch/nass-api-key"  # SecureString: USDA NASS Quick Stats key (context economics stage)
     DASHBOARD_PASSCODE = "/fieldwatch/dashboard-passcode"  # SecureString: POST /v1/auth/dashboard
     TWILIO_AUTH_TOKEN = "/fieldwatch/twilio-auth-token"  # SecureString: Twilio REST + webhook signature
     RUNTIME_ARN = "/fieldwatch/runtime-arn"  # String: written by hand after `agentcore deploy`
@@ -567,6 +568,8 @@ class ContextAPI(Protocol):
     def get_soil_profile(self, field_id: str) -> C.SoilProfile: ...
 
     def get_terrain_summary(self, field_id: str) -> C.TerrainSummary: ...
+
+    def get_water_context(self, field_id: str) -> C.WaterContext: ...
 
     def get_crop_context(self, field_id: str, as_of: str | None = None) -> dict:
         """{crop_history, cohort_field_ids, county_fips, stage}"""

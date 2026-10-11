@@ -11,6 +11,8 @@
     "ksu_drift": "K-State / Univ. of Missouri Extension, herbicide drift symptoms and soybean/corn injury",
     "isu_stand": "Iowa State Univ. Extension, corn and soybean planter skips, stand and yield",
     "isu_flood": "Iowa State / Purdue Extension, flooding and ponding effects on corn and soybean",
+    "fema_nfhl": "FEMA National Flood Hazard Layer, Special Flood Hazard Area zones (draft weight, pending agronomy review)",
+    "usgs_nhd_usfws_nwi": "USGS National Hydrography Dataset streams and USFWS National Wetlands Inventory (draft weight, pending agronomy review)",
     "nrcs_soil": "USDA NRCS Soil Data Access / Web Soil Survey (sandy texture, available water capacity)",
     "usdm": "US Drought Monitor (drought.gov category definitions)",
     "noaa_mrms": "NOAA MRMS MESH radar hail estimate; SPC storm reports",
@@ -256,6 +258,21 @@
           "weight": 3.0,
           "reason": "Photo shows standing water or yellowed drowned plants.",
           "source": "photo"
+        },
+        "floodplain_overlap_high": {
+          "weight": 2.0,
+          "reason": "Much of the stressed field lies in a mapped FEMA flood zone.",
+          "source": "fema_nfhl"
+        },
+        "stream_or_wetland_adjacent": {
+          "weight": 1.0,
+          "reason": "A mapped stream or wetland borders the field.",
+          "source": "usgs_nhd_usfws_nwi"
+        },
+        "outside_floodplain": {
+          "weight": 1.0,
+          "reason": "The field is outside mapped flood zones.",
+          "source": "fema_nfhl"
         }
       }
     },

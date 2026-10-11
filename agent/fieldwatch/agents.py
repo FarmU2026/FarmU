@@ -66,7 +66,10 @@ SPECIALIST_JOBS: dict[str, str] = {
         "scene date."
     ),
     "environment": (
-        "You check whether weather, hail, drought, soil or terrain explain the stress. Compare rain to normal."
+        "You check whether weather, hail, drought, soil or terrain explain the stress. Compare rain to normal. "
+        "get_field_context has a `water` part (mapped flood zones, streams, wetlands); for ponding use "
+        "floodplain_overlap_high when floodplain_pct is high, outside_floodplain (refutes) when floodplain_pct "
+        "is 0 and flood_zones is not empty (null means unknown), and stream_or_wetland_adjacent when a stream is within about 100 m or wetland_pct is above 0."
     ),
     "agronomy": (
         "You check disease and pest reports and what the field's history and growth stage imply."
@@ -82,7 +85,8 @@ WEIGHT_KEYS: dict[str, list[str]] = {
     "drought": ["rain_deficit_30d", "rain_normal_30d", "drought_monitor_d1_plus", "drought_monitor_none",
                 "heat_days_over_35c", "stress_uniform_field", "pattern_localized"],
     "ponding": ["lowspot_overlap_high", "lowspot_overlap_none", "heavy_rain_7d", "rain_excess_30d",
-                "soil_poorly_drained", "soil_well_drained", "photo_standing_water"],
+                "soil_poorly_drained", "soil_well_drained", "photo_standing_water", "floodplain_overlap_high",
+                "stream_or_wetland_adjacent", "outside_floodplain"],
     "nitrogen": ["rain_excess_30d", "corn_after_corn", "prior_crop_soybeans", "pattern_uniform_pale",
                  "ndre_low_ndvi_normal", "photo_v_shaped_firing", "farmer_reports_n_short", "farmer_reports_n_full",
                  "sandy_soil_overlap_high"],
