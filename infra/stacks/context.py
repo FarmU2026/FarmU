@@ -66,14 +66,17 @@ class Context(Stack):
         for name, attr in STAGE_LAMBDAS.items():
             cid = f"Stage{name.capitalize()}"
             handler = f"{HANDLER_PREFIX}.stages.{attr}"
-            if name == "baseline" and BASELINE_USES_GEO_IMAGE:
+            if name in ("soil", "terrain", "crop") or (name == "baseline" and BASELINE_USES_GEO_IMAGE):
                 fn = geo_lambda(self, cid, handler=handler, environment=env, timeout_s=300)
             else:
                 fn = python_lambda(self, cid, handler=handler, environment=env, requirements=REQUIREMENTS,
                                    timeout_s=300 if name == "baseline" else 120)
-            ctx_table.grant_write_data(fn)  # UpdateItem on the stage's own attributes only (enforced in code)
-            if name == "baseline":
+            fields.grant_read_data(fn)
+            ctx_table.grant_read_write_data(fn)  # UpdateItem on the stage's own attributes only (enforced in code)
+            if name in ("soil", "terrain", "baseline"):
                 data.bucket.grant_read_write(fn, "context/*")
+            if name == "crop":
+                data.bucket.grant_read_write(fn, "static/csb/*")
             stage_fns[name] = fn
 
         finalize = python_lambda(self, "Finalize", handler=f"{HANDLER_PREFIX}.finalize.handler",
