@@ -3,13 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<script>try{var t=localStorage.getItem("fw-theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
 <title>FieldWatch field report</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<header class="top"><h1>FieldWatch</h1><p>Field report</p></header>
-<div class="page" id="page" aria-live="polite">
-  <div class="skeleton"></div><div class="skeleton"></div>
+<header class="docbar"><div><strong>FieldWatch</strong><span class="meta">Field report</span></div></header>
+<div class="doc" id="page" aria-live="polite">
+  <div class="skel"></div><div class="skel"></div>
 </div>
 <script src="config.js"></script>
 <script src="common.js"></script>

@@ -2,97 +2,131 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
 <title>FieldWatch</title>
+<script>/* legacy links: index.html#<farmId> becomes index.html?farm=<farmId>#plots (before first paint) */
+(function () {
+  try {
+    var TABS = ["draw", "plots", "text", "activity", "farm"], h = location.hash.slice(1);
+    var theme = localStorage.getItem("fw-theme"); if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+    if (h && TABS.indexOf(h) < 0) {
+      var q = new URLSearchParams(location.search); if (!q.get("farm")) q.set("farm", decodeURIComponent(h));
+      history.replaceState(null, "", location.pathname + "?" + q.toString() + "#plots");
+    }
+  } catch (e) { /* storage blocked: ignore */ }
+})();
+</script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="styles.css">
-<style>
-  /* phone first: the phone panel comes before the dashboard on small screens */
-  #phoneCard { order: 3; } #dashCard { order: 4; }
-  @media (min-width: 1000px) { #phoneCard, #dashCard { order: 0; } }
-</style>
 </head>
 <body>
-<header class="top">
-  <h1>FieldWatch</h1>
-  <p id="tagline">Draw your fields, leave your number, and the farm texts you after every clear satellite pass.</p>
-</header>
+<div class="app">
+  <header class="bar">
+    <div class="bar-top">
+      <span class="wordmark">FieldWatch</span>
+      <span class="feed" id="feedBadge" role="status"><i class="dot" aria-hidden="true"></i><span id="feedText">Connecting</span></span>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="FieldWatch sections" id="tabs">
+      <button class="tab" role="tab" id="tab-draw" data-tab="draw" aria-controls="v-draw"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg><span>Draw</span></button>
+      <button class="tab" role="tab" id="tab-plots" data-tab="plots" aria-controls="v-plots"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/></svg><span>Plots</span></button>
+      <button class="tab" role="tab" id="tab-text" data-tab="text" aria-controls="v-text"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a8 8 0 01-11.5 7.2L3 21l1.8-6A8 8 0 1121 12z"/></svg><span>Text</span></button>
+      <button class="tab" role="tab" id="tab-activity" data-tab="activity" aria-controls="v-activity"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span>Activity</span><i class="attn" id="attn" hidden></i></button>
+      <button class="tab" role="tab" id="tab-farm" data-tab="farm" aria-controls="v-farm"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg><span>Farm</span></button>
+    </nav>
+  </header>
 
-<main id="main">
-  <div class="col-left">
-    <section class="card" id="signup">
-      <div id="signupForm">
-        <h2>1. Your farm</h2>
-        <label for="farmer">Your name</label>
-        <input id="farmer" placeholder="Dad" autocomplete="name">
-        <label for="phone">Phone number (texts go here)</label>
-        <input id="phone" type="tel" placeholder="402 555 0100" autocomplete="tel">
-        <h2 style="margin-top:20px">2. Your fields</h2>
-        <p class="hint">Click the corners of a field on the map. Then name it and press Add field.</p>
-      </div>
-      <h2 id="mapTitle" class="hidden">Your fields</h2>
-      <div id="map"></div>
-      <div id="signupControls">
-        <div class="row">
-          <input id="fname" placeholder="What do you call this field? e.g. north pivot" style="flex:2; min-width:200px">
-          <select id="fcrop" style="flex:1; min-width:120px">
-            <option>corn</option><option>soybeans</option><option>wheat</option><option>milo</option><option>alfalfa</option>
-          </select>
+  <main class="stage" id="stage">
+    <div class="mapwrap" id="mapwrap">
+      <div id="map" aria-label="Map of your fields"></div>
+      <p class="maphint" id="mapHint" hidden>Tap each corner. Tap Finish when you're done.</p>
+    </div>
+
+    <!-- DRAW -->
+    <section class="side" id="v-draw" role="tabpanel" aria-labelledby="tab-draw">
+      <button class="grab" type="button" aria-label="Resize this panel"><span></span></button>
+      <div class="side-in">
+        <h1 class="display" id="drawTitle">Draw your fields</h1>
+        <div id="signupFields">
+          <p class="lead">Tell us who to text, then mark your fields on the map. The other tabs open once you start watching.</p>
+          <label for="farmer">Your name</label>
+          <input id="farmer" placeholder="Dad" autocomplete="name">
+          <p class="err" id="farmerErr" role="alert"></p>
+          <label for="phone">Phone number (texts go here)</label>
+          <input id="phone" type="tel" inputmode="tel" placeholder="402 555 0100" autocomplete="tel">
+          <p class="err" id="phoneErr" role="alert"></p>
         </div>
-        <div class="row">
-          <button id="addField" disabled>Add field</button>
-          <button class="secondary" id="clearPts">Clear points</button>
+        <hr class="rule" id="drawRule">
+        <p class="notice" id="redrawNote" hidden></p>
+        <p class="step" id="stepText">Click the corners of your field on the map.</p>
+        <p class="meta" id="ptCount" aria-live="polite">0 corners so far</p>
+        <label for="fname">Field name</label>
+        <input id="fname" placeholder="north pivot" autocomplete="off">
+        <label for="fcrop">Crop</label>
+        <select id="fcrop"><option>corn</option><option>soybeans</option><option>wheat</option><option>milo</option><option>alfalfa</option></select>
+        <div class="actions">
+          <button class="btn secondary" id="undoPt" type="button" disabled>Undo</button>
+          <button class="btn secondary" id="clearPts" type="button" disabled>Clear</button>
+          <button class="btn primary" id="addField" type="button" disabled>Finish</button>
         </div>
-        <ul class="fields" id="fieldList"></ul>
-        <div class="row">
-          <button id="start" disabled>Start watching</button>
+        <p class="err" id="drawMsg" role="status"></p>
+        <div id="draftWrap">
+          <h2 class="section" id="draftTitle" hidden>Added so far</h2>
+          <ul class="rows plain" id="draftList"></ul>
         </div>
-        <p id="err" class="err"></p>
+        <div class="actions end" id="startRow">
+          <button class="btn primary" id="start" type="button" disabled>Start watching</button>
+        </div>
+        <p class="err" id="err" role="alert"></p>
       </div>
     </section>
 
-    <section class="card hidden" id="live">
-      <h2>Live from the satellite</h2>
-      <p class="hint" id="checked"></p>
-      <div id="fieldsOut"></div>
+    <!-- PLOTS: latest check and recommendations first, small map, then the field list -->
+    <section class="page plotspage" id="v-plots" role="tabpanel" aria-labelledby="tab-plots">
+      <div class="plots-grid">
+        <div class="p-recs" id="plotRecs"></div>
+        <aside class="p-map" aria-label="Map of your fields">
+          <div class="mapslot" id="mapSlot"></div>
+          <p class="legend" id="mapLegend"></p>
+        </aside>
+        <div class="p-fields">
+          <h2 class="section">Your fields</h2>
+          <div id="plotList"></div>
+          <div class="foot">
+            <button class="btn secondary" id="btnCheck" type="button">Check satellite now</button>
+            <p class="meta" id="checked"></p>
+            <p class="err" id="checkMsg" role="status"></p>
+          </div>
+        </div>
+      </div>
     </section>
-  </div>
 
-  <div class="col-right">
-    <section class="card hidden dash" id="dashCard" aria-live="polite">
-      <div class="dash-head">
-        <h2>What FieldWatch is checking</h2>
-        <span class="badge" id="feedBadge">Connecting</span>
-      </div>
-      <div class="chips" id="fieldChips"></div>
-      <div class="invtabs" id="invTabs"></div>
-      <div id="invBody">
-        <p class="hint">Nothing is being checked right now. Press ASK on the phone, or wait for the next clear satellite pass.</p>
-      </div>
-    </section>
-
-    <section class="card hidden" id="phoneCard">
-      <h2>Your phone</h2>
-      <p class="hint" id="smsStatus"></p>
-      <div class="phone" id="thread" role="log" aria-live="polite"></div>
-      <div class="row phone-actions">
-        <button id="btnAsk">ASK</button>
-        <button id="btnYes">YES</button>
-        <button class="secondary" id="btnNo">NO</button>
-        <button class="secondary" id="btnMore">MORE</button>
-      </div>
-      <form class="reply" id="replyForm">
-        <input id="replyText" placeholder="Type a reply" aria-label="Type a reply" autocomplete="off">
-        <button class="secondary" type="submit" id="btnSend">Send</button>
+    <!-- TEXT: the message thread and one input, nothing else -->
+    <section class="page textpage" id="v-text" role="tabpanel" aria-labelledby="tab-text">
+      <div class="thread" id="thread" role="log" aria-live="polite" aria-label="Conversation with FieldWatch"></div>
+      <form class="composer" id="replyForm" autocomplete="off">
+        <label class="sr" for="replyText">Message FieldWatch</label>
+        <input id="replyText" placeholder="Type a message" autocomplete="off" enterkeyhint="send">
+        <button class="send" type="submit" id="btnSend" aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12l16-8-6 16-3-7z"/></svg></button>
       </form>
-      <div class="row"><button class="secondary" id="btnCheck" style="flex:1">Check satellite now</button></div>
     </section>
-  </div>
-</main>
+
+    <!-- ACTIVITY -->
+    <section class="page" id="v-activity" role="tabpanel" aria-labelledby="tab-activity">
+      <div class="inner" id="activityBody"></div>
+    </section>
+
+    <!-- FARM -->
+    <section class="page" id="v-farm" role="tabpanel" aria-labelledby="tab-farm">
+      <div class="inner narrow" id="farmBody"></div>
+    </section>
+  </main>
+</div>
 
 <script src="config.js"></script>
 <script src="common.js"></script>
 <script src="realtime.js"></script>
+<script src="fieldsapi.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="app.js"></script>
 </body>
