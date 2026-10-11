@@ -9,7 +9,7 @@ Column key: **dir** = usual direction by key name (heuristic): `+` supports, `-`
 - **Priors.** Raw priors sum to 1.01 (conditions are not exclusive, so about 1 is fine). After crop/stage/irrigation adjust at R2 they sum to (above 1 means a field starts with more than 100% of blame spread across causes; a healthy field then shows several 'open' conditions at 20%+): corn irrigated 1.30, corn dryland 1.28, soybeans irrigated 1.09, soybeans dryland 1.11. Pivot gets -6.0 log-odds when dryland (effectively off).
 - **Dead keys** (in catalog, no agent can emit): none.
 - **Orphan keys** (agents can emit, not in catalog, so silently ignored): none.
-- **LLM-only keys**: 65 of 69 keys rely on a specialist choosing to emit them (no deterministic code path); only `hail.hail_swath_overlap_high`, `pivot_failure.ring_pattern_strong`, `ponding.lowspot_overlap_high`, `sandy_soil_water_stress.sandy_soil_overlap_high` are emitted by code.
+- **LLM-only keys**: 68 of 72 keys rely on a specialist choosing to emit them (no deterministic code path); only `hail.hail_swath_overlap_high`, `pivot_failure.ring_pattern_strong`, `ponding.lowspot_overlap_high`, `sandy_soil_water_stress.sandy_soil_overlap_high` are emitted by code.
 - **Weights above 2.5** (19): `pivot_failure.farmer_reports_pivot_down` 3.5, `hail.hail_mesh_large` 3.5, `disease_pest.photo_tar_spot_lesions` 3.5, `pivot_failure.ring_pattern_strong` 3.2, `hail.no_hail_mesh` 3, `hail.hail_swath_overlap_high` 3, `hail.photo_leaf_shredding` 3, `ponding.lowspot_overlap_high` 3, `ponding.photo_standing_water` 3, `nitrogen.photo_v_shaped_firing` 3, `herbicide_drift.photo_leaf_cupping` 3, `herbicide_drift.farmer_reports_neighbor_spray` 3, `planter_skip.stripe_pattern_strong` 3, `planter_skip.photo_gaps_in_row` 3, `planter_skip.farmer_reports_planter_issue` 3, `disease_pest.photo_gray_leaf_spot_lesions` 3, `disease_pest.photo_sds_symptoms` 3, `disease_pest.photo_insect_feeding` 3, `sandy_soil_water_stress.sandy_soil_overlap_high` 3.
 - **Reused keys with inconsistent strength** (4): `edge_pattern_strong` herbicide_drift 2.5, pivot_failure 0.8; `rain_deficit_30d` drought 2.5, sandy_soil_water_stress 1.5, pivot_failure 0.6; `rain_normal_30d` drought 2, sandy_soil_water_stress 0.8, pivot_failure 0.4; `sandy_soil_overlap_high` sandy_soil_water_stress 3, nitrogen 0.8.
 - **Semantic oddities.** `drought.pattern_localized` is a *supports* weight for drought, but a localized pattern usually argues against uniform drought. `pivot_failure.rain_normal_30d` supports pivot failure (0.4) while the same key refutes drought (2.0): confirm intent. `nitrogen.rain_excess_30d` and `ponding.rain_excess_30d` fire on the same fact, so both rise. `sandy_soil_overlap_high` feeds both sandy_soil_water_stress (3.0) and nitrogen (0.8).
@@ -92,9 +92,12 @@ Adjust (log-odds): crop soybeans +0.2; stage early +0.5
 | `photo_standing_water` | 3 | + | llm | BIG | Photo shows standing water or yellowed drowned plants. | photo | |
 | `lowspot_overlap_none` | 2 | - | llm |  | The stressed area is not in low spots. | analyzer | |
 | `heavy_rain_7d` | 2 | + | llm |  | Heavy rain in the last week (about 50 mm or more). | isu_flood | |
+| `floodplain_overlap_high` | 2 | + | llm |  | Much of the stressed field lies in a mapped FEMA flood zone. | fema_nfhl | |
 | `rain_excess_30d` | 1.5 | + | llm | DUP | Rain over 30 days well above normal. | isu_flood | |
 | `soil_poorly_drained` | 1.5 | + | llm |  | Soil map units are poorly or somewhat poorly drained. | nrcs_soil | |
 | `soil_well_drained` | 1.5 | - | llm |  | Soil map units are well drained. | nrcs_soil | |
+| `stream_or_wetland_adjacent` | 1 | + | llm |  | A mapped stream or wetland borders the field. | usgs_nhd_usfws_nwi | |
+| `outside_floodplain` | 1 | + | llm |  | The field is outside mapped flood zones. | fema_nfhl | |
 
 ### nitrogen (Nitrogen shortage): prior 12%
 
