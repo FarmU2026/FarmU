@@ -1,0 +1,14 @@
+{
+  "schema_version": "1",
+  "scenario_id": "REPLACE-WITH-SCENARIO-ID",
+  "farm_fixture": "demo_farm.json",
+  "field_id": "REPLACE-WITH-FIELD-ID",
+  "as_of": "2026-01-01",
+  "expected": {
+    "alert": false,
+    "top_condition": null,
+    "action_type": null,
+    "max_trigger_to_message_s": 60
+  },
+  "scripted_replies": []
+}
