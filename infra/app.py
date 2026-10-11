@@ -18,6 +18,7 @@ from stacks.context import Context
 from stacks.data_plane import DataPlane
 from stacks.feed import Feed
 from stacks.frontend import Frontend
+from stacks.hazards import Hazards
 from stacks.monitoring import Monitoring
 from stacks.notifications import Notifications
 from stacks.scenes import Scenes
@@ -33,6 +34,7 @@ Access(app, "FieldWatch-Access", data=data, env=env)
 
 # --- pipelines ---
 scenes = Scenes(app, "FieldWatch-Scenes", data=data, env=env)  # WS2 scene pipeline + replay
+Hazards(app, "FieldWatch-Hazards", data=data, env=env)  # WS3 hail and drought
 context = Context(app, "FieldWatch-Context", data=data, env=env)  # WS15; context.state_machine for the web API
 
 # --- agents and tools ---
@@ -50,7 +52,5 @@ Frontend(app, "FieldWatch-Frontend", api=api, feed=feed, env=env)  # WS14 web/ o
 # --- operations ---
 Monitoring(app, "FieldWatch-Monitoring", scenes=scenes, context=context, agent=agent, notifications=notifications,
            feed=feed, api=api, tools=tools, env=env)  # DLQ + Lambda error alarms -> SNS fieldwatch-alarms, dashboard
-
-# Still to come: Hazards (WS3, Kurt).
 
 app.synth()

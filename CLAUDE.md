@@ -16,7 +16,7 @@ Strands agents that watch a family farm's fields from satellite, diagnose proble
 - `agent/web/server.py` (FastAPI) is a local dev harness only: `cd agent; python -m uvicorn web.server:app --port 8000`.
 
 ## Rules
-- To call another lane, import from `fieldwatch.interfaces`; if what you need isn't there, propose it in a separate PR. Never guess another lane's names. It holds the lane Protocols and loaders (`notify()`, `approvals()`, `actions()`, `analysis()`, `toolset()`), `FieldwatchError` and its codes, the event registry, table rows, and the names of tables, SSM parameters, env vars, functions and event sources.
+- To call another lane, import from `fieldwatch.interfaces`; if what you need isn't there, propose it in a separate PR. Never guess another lane's names. It holds the lane Protocols and loaders (`notify()`, `approvals()`, `actions()`, `analysis()`, `toolset()`, `context()`), `FieldwatchError` and its codes, the event registry, table rows, and the names of tables, SSM parameters, env vars, functions and event sources.
 - Every bus event goes through `interfaces.publish_event` (validated against `EVENT_REGISTRY`); a test fails on any other `put_events` call.
 - Build against `contracts.py` and `fixtures/contracts/`. Never change a contract inside a feature change; contract changes are their own small PR.
 - Edit only your workstream's paths (`docs/workstreams.md`). Shared files have owners.

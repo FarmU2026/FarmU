@@ -184,6 +184,22 @@ def test_load_boundary_errors(aws, fake_net, setup):
     assert tile_rows(aws) == []
 
 
+@pytest.fixture(autouse=True)
+def offline_context_sources(monkeypatch):
+    from dataclasses import replace
+    from fieldwatch import registry, context
+    sample = C.FieldContext.model_validate(json.loads((Path(C.__file__).parents[1] / "fixtures/contracts/field_context.json").read_text()))
+    profile = lambda field_id: sample.soil.model_copy(update={"field_id": field_id})
+    monkeypatch.setitem(registry.BY_NAME, "get_soil_profile", replace(registry.BY_NAME["get_soil_profile"], fn=profile, stub=False))
+    monkeypatch.setattr(context, "get_soil_profile", profile)
+    monkeypatch.setattr(context, "get_terrain_summary", lambda field_id: sample.terrain)
+    monkeypatch.setattr(context, "cached_cohort_field_ids", lambda field_id: sample.cohort_field_ids)
+    monkeypatch.setattr(context, "get_crop_context", lambda field_id: {k: getattr(sample,k) for k in ("crop_history", "cohort_field_ids", "county_fips", "stage")})
+    monkeypatch.setattr(context, "get_economics", lambda field_id: {k: getattr(sample,k) for k in ("expected_yield_bu_ac", "price_usd_bu", "price_as_of")})
+    report = C.DiseaseReport.model_validate(json.loads((Path(C.__file__).parents[1] / "fixtures/contracts/disease_report.json").read_text()))
+    monkeypatch.setattr(context, "disease_reports", lambda *args: [report])
+
+
 # ---------- stages ----------
 
 EVENT = {"schema_version": "1", "farm_id": FARM, "field_id": FIELD,
@@ -238,9 +254,9 @@ def test_all_stages_assemble_the_contract_sample(aws):
     C.TerrainSummary.model_validate(item["terrain"])
 
 
-def test_registry_stubs_are_reported(aws):
+def test_live_registry_is_reported(aws):
     out = stages.soil_handler(EVENT)
-    assert out["stub"] is True  # registry entry is still a stub; flips to False when Kurt's lands
+    assert out["stub"] is False
 
 
 def test_real_registry_function_is_used_when_it_replaces_the_stub(aws, monkeypatch):
@@ -260,10 +276,10 @@ def test_real_registry_function_is_used_when_it_replaces_the_stub(aws, monkeypat
     assert get_context(aws)["soil"]["map_units"] == []
 
 
-def test_adapter_falls_back_to_contract_samples_without_registry(aws, monkeypatch):
+def test_adapter_calls_live_context_without_registry(aws, monkeypatch):
     monkeypatch.setattr(adapters, "_registry", lambda: None)
     out = stages.economics_handler(EVENT)
-    assert out["stub"] is True and get_context(aws)["price_usd_bu"] == 4.2
+    assert out["stub"] is False and get_context(aws)["price_usd_bu"] == 4.2
 
 
 def test_baseline_uses_waiting_analysis_module_when_present(aws, monkeypatch):
@@ -496,8 +512,17 @@ def test_stack_wiring(machine):
     _, template, ctx_stack = machine
     template.has_output("StateMachineArn", {})
     assert len(template.find_resources("AWS::Lambda::Function")) == 8
-    handlers = {r["Properties"]["Handler"] for r in template.find_resources("AWS::Lambda::Function").values()}
+    handlers = {r["Properties"].get("Handler") or r["Properties"]["ImageConfig"]["Command"][0] for r in template.find_resources("AWS::Lambda::Function").values()}
     assert "cloud.lambdas.context.load_boundary.handler" in handlers and "cloud.lambdas.context.finalize.handler" in handlers
     for attr in ctx_stack.STAGE_LAMBDAS.values():
         assert f"cloud.lambdas.context.stages.{attr}" in handlers
         assert callable(getattr(stages, attr))  # every deployed handler exists
+
+def test_adapter_without_strands_uses_live_domain(monkeypatch):
+    from cloud.lambdas.context import adapters
+    import fieldwatch.context as context
+    from fieldwatch.contracts import SoilProfile
+    monkeypatch.setattr(adapters,"_registry",lambda:None)
+    monkeypatch.setattr(context,"get_soil_profile",lambda field_id:SoilProfile(field_id=field_id,map_units=[]))
+    result=adapters.get_soil_profile("different-field")
+    assert not result.stub and result.value.field_id=="different-field"

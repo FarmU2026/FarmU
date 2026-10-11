@@ -95,7 +95,10 @@ class Access(Stack):
 
         # --- Developer users: no credentials here; Caleb creates them in the console ---
         for name in DEVELOPERS:
-            user = iam.User(self, f"User-{name}", user_name=f"fieldwatch-{name}", permissions_boundary=boundary)
+            user = iam.User(self, f"User-{name}", user_name=f"fieldwatch-{name}", permissions_boundary=boundary,
+                            # `aws login` (CLI sign-in through the browser) needs signin:AuthorizeOAuth2Access
+                            # and signin:CreateOAuth2Token; AWS ships them as this managed policy.
+                            managed_policies=[iam.ManagedPolicy.from_aws_managed_policy_name("SignInLocalDevelopmentAccess")])
             user.add_to_policy(iam.PolicyStatement(actions=["sts:AssumeRole"], resources=[dev.role_arn]))
             user.add_to_policy(iam.PolicyStatement(
                 actions=["iam:ChangePassword", "iam:GetUser", "iam:ListAccessKeys", "iam:CreateAccessKey",

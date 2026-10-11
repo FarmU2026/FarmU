@@ -11,7 +11,7 @@ What lives here:
   4. Rows shared across lanes: `FarmItem`, `PersonItem`, `ThreadItem`, `InvestigationRecord`,
      `ApprovalRecord`, `ActionRecord` (the DynamoDB items more than one lane reads or writes).
   5. Protocols for each lane's callable surface, with the canonical import path and a loader:
-     NotifyAPI (WS9), ApprovalsAPI / ActionsAPI (WS8), AnalysisAPI (WS1), ToolsetAPI (WS6).
+     NotifyAPI (WS9), ApprovalsAPI / ActionsAPI (WS8), AnalysisAPI (WS1), ToolsetAPI (WS6), ContextAPI (WS4).
 
 This module imports only `contracts` and `config` at import time, so every lane (and every Lambda bundle)
 can import it without pulling in another lane's dependencies.
@@ -559,7 +559,30 @@ class ToolsetAPI(Protocol):
                   names: Iterable[str] | None = None) -> Sequence: ...
 
 
+class ContextAPI(Protocol):
+    """WS4 (Kurt). Canonical module: `fieldwatch.context` (get it with `context()`). Each function is one
+    component of FieldContext, so the context workflow's stages stay independent. Only the facade is part of the
+    seam: the modules behind it (soil, terrain, boundaries, disease, economics) are Kurt's to reorganize."""
+
+    def get_soil_profile(self, field_id: str) -> C.SoilProfile: ...
+
+    def get_terrain_summary(self, field_id: str) -> C.TerrainSummary: ...
+
+    def get_crop_context(self, field_id: str, as_of: str | None = None) -> dict:
+        """{crop_history, cohort_field_ids, county_fips, stage}"""
+
+    def get_economics(self, field_id: str, as_of: str | None = None) -> dict:
+        """{expected_yield_bu_ac, price_usd_bu, price_as_of, sources}"""
+
+    def get_field_context(self, field_id: str) -> C.FieldContext: ...
+
+    def disease_reports(self, county_fips: str, crop: str, season: int) -> list[C.DiseaseReport]: ...
+
+    def cached_cohort_field_ids(self, field_id: str) -> list[str]: ...
+
+
 CANONICAL = {
+    "context": "fieldwatch.context",
     "notify": "fieldwatch.notify:Notifications",
     "approvals": "fieldwatch.approvals",
     "actions": "fieldwatch.actions",
@@ -579,6 +602,11 @@ def actions() -> ActionsAPI:
 
 def toolset() -> ToolsetAPI:
     return importlib.import_module("fieldwatch.toolset")  # type: ignore[return-value]
+
+
+def context() -> ContextAPI:
+    """Kurt's field-context facade. Light to import (no Strands), so the stage Lambdas can use it."""
+    return importlib.import_module(CANONICAL["context"])  # type: ignore[return-value]
 
 
 def _optional(path: str):
