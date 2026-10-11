@@ -19,15 +19,25 @@ TerrainSummary, DiseaseReport and FieldContext contracts. No Strands or web impo
   Without a key or usable rows, corn/soybean/wheat/milo use explicit planning
   assumptions, with no market quote date. Alfalfa ton-based values are never
   returned in the contract's bushel units.
-- Disease: county feed parser distinguishes current confirmations from history
-  and excludes observations after the requested season. Configure
-  FIELDWATCH_EDDMAPS_COUNTY_URL (with {species} and {season} placeholders), or
-  FIELDWATCH_EDDMAPS_SNAPSHOT pointing to a JSON object keyed by species ID
-  (84963, 17596, 17739). Feed rows contain county_fips/FIPS, status,
-  first_observed and last_observed. The live map returned HTTP 403 during this
-  implementation; the exact authorized county feed must be supplied by the
-  data owner. Missing configuration raises a clear error, preserving a partial
-  workflow result rather than fabricating confirmations.
+- Disease: the public EDDMapS annual-progress county JSON feed works without a
+  token. Default and exact optional FIELDWATCH_EDDMAPS_COUNTY_URL value:
+  `https://maps.eddmaps.org/annualprogress/data.cfm?sub={species}&year={season}`.
+  Requests identify themselves as FieldWatch because CloudFront blocks the
+  default requests user agent. The year query selects the requested season.
+  The feed has `us`, `ca`, and `mx` maps; `us` is keyed by county FIPS (leading zeroes may be omitted).
+  County values use `ObservationDate`, `LastObservationDate` (MM-DD-YYYY), and
+  `Type` (`Certain` for current confirmations, `History` for historical reports).
+  Only Certain records whose last observation is in the requested season are
+  current; future observation dates are excluded. This seam accepts a season,
+  not a within-season cutoff date. Unknown payload schemas and HTTP failures
+  raise errors, preserving a partial workflow result.
+  FIELDWATCH_EDDMAPS_SNAPSHOT optionally selects an offline JSON object keyed by
+  species ID (84963, 17596, 17739), with each value a public feed payload or the
+  existing exported county row list. An explicit URL takes precedence.
+  A live check on October 10, 2026 for Thurston County, NE (31173), season 2026
+  returned tar spot history (2021-10-06 through 2023-09-21), southern rust history
+  (2018-07-26 through 2020-07-23), and no gray leaf spot county row. Absence is no
+  county evidence, never evidence that a disease is absent from the field.
 
 The registry keeps its single DiseaseReport shape; get_disease_reports returns
 the first confirmed report (then alphabetically) and raises LookupError when
@@ -48,3 +58,10 @@ No credentials are created or deployments performed.
 Validation: offline source and workflow tests; no AWS calls. USDA source URL was
 verified with HTTP HEAD (200); a small SDA live check timed out. DEM/CSB live
 geospatial reads and NASS authenticated queries still need deployment validation.
+
+To repeat the public feed check (network required; no AWS):
+
+```powershell
+cd agent
+python -m pytest tests/test_context_disease.py -q -m live -s
+```
