@@ -1,7 +1,7 @@
 """Gates: reasons not to raise a problem even when pixels look odd. Pure functions."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import numpy as np
 
@@ -18,12 +18,28 @@ def _on_or_after(d: date, md: tuple[int, int] | None) -> bool:
     return md is not None and (d.month, d.day) >= md
 
 
-def seasonal(crop: str, d: date) -> tuple[bool, bool]:
-    """(senescence, harvest) by scene date and crop. Alfalfa is cut on a cycle, so neither applies."""
-    return (
-        _on_or_after(d, SENESCENCE_ONSET.get(crop, SENESCENCE_ONSET["other"])),
-        _on_or_after(d, HARVEST_ONSET.get(crop, HARVEST_ONSET["other"])),
-    )
+# Calendar onsets are the default; a dry or hot year starts drying down earlier, so the canopy itself can also
+# open the gate. Real scenes (Thurston Co. NE, 2026): corn NDVI median 0.89 late July, 0.86 on Sep 10, 0.78 on
+# Sep 18, 0.35 on Oct 5. Changes since the previous pass during peak canopy stay within +-0.04.
+DRYDOWN_LEAD_DAYS = 14        # the canopy test applies from this many days before the calendar onset
+DRYDOWN_DELTA = -0.05         # median NDVI change since the previous pass that means "the whole canopy is drying"
+HARVEST_NDVI_P50 = 0.35       # a field median this low after mid-September is harvested or dead, not a problem area
+
+
+def seasonal(crop: str, d: date, *, delta_since_last: float | None = None,
+             ndvi_p50: float | None = None) -> tuple[bool, bool]:
+    """(senescence, harvest) by scene date and crop, opened early by the canopy itself (see constants above).
+    Alfalfa is cut on a cycle, so neither applies."""
+    onset = SENESCENCE_ONSET.get(crop, SENESCENCE_ONSET["other"])
+    senescence = _on_or_after(d, onset)
+    harvest = _on_or_after(d, HARVEST_ONSET.get(crop, HARVEST_ONSET["other"]))
+    if onset is not None and not senescence:
+        early = date(d.year, *onset) - timedelta(days=DRYDOWN_LEAD_DAYS)
+        if d >= early and delta_since_last is not None and delta_since_last <= DRYDOWN_DELTA:
+            senescence = True
+    if onset is not None and not harvest and d >= date(d.year, 9, 15) and ndvi_p50 is not None             and ndvi_p50 <= HARVEST_NDVI_P50:
+        senescence = harvest = True
+    return senescence, harvest
 
 
 def uniform_drop(diff: np.ndarray, z_baseline: float | None, z_threshold: float,

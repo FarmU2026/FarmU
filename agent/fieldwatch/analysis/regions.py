@@ -12,9 +12,25 @@ SEASON_SD_FLOOR = 0.05    # NDVI units; with 2-3 prior seasons the spread betwee
 
 
 def baseline_mean(history_ndvi: list[np.ndarray]) -> np.ndarray:
+    """Per-pixel NDVI expected for this date from prior seasons. With three or more seasons the median is used:
+    one season with a haze edge, a different crop or its own problem area would otherwise leak into the baseline
+    and become noise in today's z (measured: mid-July pixel sigma 0.035-0.047 with the mean, lower with the median)."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
-        return np.nanmean(np.stack(history_ndvi), axis=0)
+        stack = np.stack(history_ndvi)
+        return np.nanmedian(stack, axis=0) if len(history_ndvi) >= 3 else np.nanmean(stack, axis=0)
+
+
+SMALL_REGION_ACRES = 2.5     # below this a region needs stronger evidence than the plain threshold
+SMALL_REGION_SCORE = 3.0     # mean z required of a small region (real clean fields only ever gave 2.2-2.7 blips)
+
+
+def strong_enough(area_acres: float, score: float, z_threshold: float) -> bool:
+    """A region must clear the z threshold; a small one (a few pixels' worth) must clear a higher bar, because a
+    handful of noisy pixels is the most common false alarm on a clean field."""
+    if area_acres >= SMALL_REGION_ACRES:
+        return score >= z_threshold
+    return score >= max(z_threshold, SMALL_REGION_SCORE)
 
 
 def season_sd(history_ndvi: list[np.ndarray]) -> float:
@@ -49,7 +65,10 @@ def smooth_nan(z: np.ndarray, size: int = 3) -> np.ndarray:
 
 def find_regions(z: np.ndarray, z_threshold: float, min_pixels: int) -> tuple[list[np.ndarray], np.ndarray]:
     """Connected areas where smoothed z <= -z_threshold, at least `min_pixels` big, largest first.
-    Also returns the smoothed z map."""
+    Also returns the smoothed z map.
+
+    (Tried and dropped: growing regions into neighbours down to 0.6-0.85 x threshold. It recovered a few
+    percent more of a noisy ring but made clean fields emit 2-3 spurious 1-3 acre regions.)"""
     zs = smooth_nan(z)
     # smoothing denoises; the raw check stops the blur from growing the region past the stressed pixels
     bad = np.isfinite(zs) & (zs <= -z_threshold) & (z <= -z_threshold / 2)

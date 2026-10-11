@@ -69,13 +69,12 @@ def analyze_stacks(current: IndexStack, history: list[IndexStack], previous: Ind
                    z_threshold: float = 2.0, min_region_acres: float = 1.2) -> CoreResult:
     grid = current.grid
     indices = index_stats(current)
-    senescence, harvest = G.seasonal(crop, current.date)
-
     delta = None
     if previous is not None:
         both = current.valid & previous.valid
         if both.any():
             delta = round(float(np.median(current.ndvi[both] - previous.ndvi[both])), 3)
+    senescence, harvest = G.seasonal(crop, current.date, delta_since_last=delta, ndvi_p50=indices.ndvi.p50)
 
     if not history:
         return CoreResult(
@@ -95,6 +94,8 @@ def analyze_stacks(current: IndexStack, history: list[IndexStack], previous: Ind
     zpix = regions.pixel_z(diff)
     min_px = max(1, int(np.ceil(min_region_acres / grid.pixel_acres)))
     masks, zs = regions.find_regions(zpix, z_threshold, min_px)
+    masks = [m for m in masks if regions.strong_enough(float(m.sum()) * grid.pixel_acres,
+                                                       float(-np.nanmean(zs[m])), z_threshold)]
 
     feats = patterns.features_for(masks, grid, current.inside, pivot, layers)
     out_regions = []
