@@ -50,16 +50,16 @@ is `{request: <SendMessageRequest>, scheduled: true}` and is only for private in
 **WS8:** the lazy adapter in `cloud/lambdas/notify/runtime.py` calls:
 
 ```python
-fieldwatch.approvals.record_decision(
-    approval_id=approval_id, person_id=person_id,
-    decision="approved",  # or "declined"
-    channel="sms",
+interfaces.approvals().record_decision(
+    approval_id, "approved", person_id, "sms",  # or "declined"
+    from_phone=recipient_phone, emit=False,
 )  # returns contracts.Approval (or its exact dict)
 ```
 
-WS8's module is absent in this checkout. Until it lands, approval replies fail closed.
-The function must enforce pending status, recipient and expiry atomically, returning
-the existing decision on retries/races. WS9 emits `ApprovalRecorded` for the returned
+The adapter uses WS8 through `fieldwatch.interfaces`, resolves the recipient phone
+from DynamoDB, and returns the stored approval for already decided, expired, or
+policy-denied replies. WS8 enforces pending status, recipient and expiry atomically.
+WS9 emits `ApprovalRecorded` for the returned
 decision and never also emits `ReplyReceived` for that reply. WS8 must not independently
 publish that same event from this function. The adapter is the only place to reconcile
 a different WS8 function signature. Pending approvals created by send include the
@@ -104,6 +104,9 @@ schedules use UTC `at(...)`, deterministic names, retry limits and automatic del
 as described in the [Scheduler API](https://docs.aws.amazon.com/scheduler/latest/APIReference/API_CreateSchedule.html).
 
 ## Offline validation
+
+See [LIVE_TEST.md](LIVE_TEST.md) for Caleb's secret/configuration provisioning and
+the real-handset alert, YES, work-order, HELP, STOP/START, and quiet-hours checks.
 
 Install the repo's declared `agent/requirements-dev.txt` and `infra/requirements.txt`
 in the test environment. From `agent/`:
