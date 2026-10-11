@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -54,6 +54,18 @@ class FarmIn(BaseModel):
 
 class ReplyIn(BaseModel):
     text: str
+
+
+class FieldAddIn(BaseModel):
+    name: str = Field(max_length=80)
+    crop: str = "corn"
+    polygon: list[list[float]]
+
+
+class FieldPatchIn(BaseModel):
+    name: str | None = Field(default=None, max_length=80)
+    crop: str | None = None
+    polygon: list[list[float]] | None = None
 
 
 # ---------- storage ----------
@@ -287,6 +299,14 @@ if sms.provider() == "twilio" and os.getenv("FIELDWATCH_SMS_POLL", "1") != "0":
 # ---------- routes ----------
 
 
+@app.exception_handler(HTTPException)
+async def _http_error(_request: Request, exc: HTTPException):
+    """Structured errors ({code, message, retryable} detail) get the deployed API's body; plain ones keep FastAPI's."""
+    if isinstance(exc.detail, dict) and "code" in exc.detail:
+        return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
+    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+
+
 @app.get("/")
 def index():
     return FileResponse(STATIC / "index.html")
@@ -318,6 +338,120 @@ def create_farm(body: FarmIn):
     save(farm)
     pull_farm(farm_id, only_if_newer=False)
     return load(farm_id)
+
+
+CROPS = ("corn", "soybeans", "wheat", "milo", "alfalfa", "other")
+CROP_ALIASES = {"soybean": "soybeans", "soy": "soybeans", "beans": "soybeans", "maize": "corn", "sorghum": "milo", "hay": "alfalfa"}
+
+
+def _err(status: int, code: str, message: str) -> HTTPException:
+    # Same error body as the deployed API: {"error": {"code", "message", "retryable"}} (see the handler below).
+    return HTTPException(status, {"code": code, "message": message, "retryable": False})
+
+
+def _valid_crop(c: str | None) -> str:
+    crop = (c or "corn").strip().lower()
+    crop = CROP_ALIASES.get(crop, crop)
+    if crop not in CROPS:
+        raise _err(400, "INVALID_INPUT", f"crop: must be one of {', '.join(sorted(CROPS))}")
+    return crop
+
+
+def _valid_name(name: str, others: list[dict]) -> str:
+    name = (name or "").strip()
+    if not name:
+        raise _err(400, "INVALID_INPUT", "name: give the field a name")
+    if any(f["name"].strip().lower() == name.lower() for f in others):
+        raise _err(400, "INVALID_INPUT", f"name: this farm already has a field called {name!r}")
+    return name
+
+
+def _valid_polygon(polygon: list[list[float]]) -> list[list[float]]:
+    if len(polygon) < 3 or any(len(p) != 2 for p in polygon):
+        raise _err(400, "INVALID_INPUT", "polygon: needs at least 3 [lat, lon] points")
+    if any(not (-90 <= lat <= 90 and -180 <= lon <= 180) for lat, lon in polygon):
+        raise _err(400, "INVALID_INPUT", "polygon: points must be [lat, lon]")
+    return polygon
+
+
+def _load_or_404(farm_id: str) -> dict:
+    try:
+        return load(farm_id)
+    except HTTPException:
+        raise _err(404, "NOT_FOUND", "No such farm") from None
+
+
+def _field_or_404(farm: dict, field_id: str) -> dict:
+    field = next((f for f in farm["fields"] if f["id"] == field_id), None)
+    if not field:
+        raise _err(404, "NOT_FOUND", "No such field")
+    return field
+
+
+def _first_look(farm: dict, field: dict) -> None:
+    """New or redrawn outline: forget the old scene and pull the latest pass (no context builder locally)."""
+    for k in ("last_scene_date", "stats"):
+        field.pop(k, None)
+    for kind in ("truecolor", "health"):
+        (IMAGES / farm["farm_id"] / f"{field['id']}_{kind}.png").unlink(missing_ok=True)
+    try:
+        pull_field(farm, field, only_if_newer=False)
+    except Exception as e:  # the edit is saved; the next check retries
+        post(farm, "fieldwatch", f"Could not fetch imagery for the {field['name']}: {e}", field_id=field["id"])
+
+
+@app.post("/api/farms/{farm_id}/fields")
+def add_field(farm_id: str, body: FieldAddIn):
+    with LOCK:
+        farm = _load_or_404(farm_id)
+        name = _valid_name(body.name, farm["fields"])
+        crop = _valid_crop(body.crop)
+        latlon = _valid_polygon(body.polygon)
+        taken = {f["id"] for f in farm["fields"]}
+        base = _slug(name)
+        fid, n = base, 2
+        while fid in taken or (IMAGES / farm_id / f"{fid}_truecolor.png").exists():  # never inherit a removed field's images
+            fid, n = f"{base}-{n}", n + 1
+        field = {"id": fid, "name": name, "crop": crop, "acres": _acres(latlon), "irrigation": "unknown",
+                 "polygon": [[lon, lat] for lat, lon in latlon]}
+        farm["fields"].append(field)
+        _first_look(farm, field)
+        save(farm)
+        return farm
+
+
+@app.patch("/api/farms/{farm_id}/fields/{field_id}")
+def update_field(farm_id: str, field_id: str, body: FieldPatchIn):
+    with LOCK:
+        farm = _load_or_404(farm_id)
+        field = _field_or_404(farm, field_id)
+        if body.name is None and body.crop is None and body.polygon is None:
+            raise _err(400, "INVALID_INPUT", "send at least one of name, crop, polygon")
+        if body.name is not None:
+            field["name"] = _valid_name(body.name, [f for f in farm["fields"] if f["id"] != field_id])
+        if body.crop is not None:
+            field["crop"] = _valid_crop(body.crop)
+        if body.polygon is not None:
+            latlon = _valid_polygon(body.polygon)
+            field["polygon"] = [[lon, lat] for lat, lon in latlon]
+            field["acres"] = _acres(latlon)
+            _first_look(farm, field)
+        save(farm)
+        return farm
+
+
+@app.delete("/api/farms/{farm_id}/fields/{field_id}")
+def delete_field(farm_id: str, field_id: str):
+    """Stop watching: the field leaves the farm file (the watcher and ASK only read that list) and its images go.
+    Thread messages stay as history."""
+    with LOCK:
+        farm = _load_or_404(farm_id)
+        field = _field_or_404(farm, field_id)
+        farm["fields"].remove(field)
+        for kind in ("truecolor", "health"):
+            (IMAGES / farm_id / f"{field_id}_{kind}.png").unlink(missing_ok=True)
+        save(farm)
+        return farm
 
 
 @app.get("/api/farms/{farm_id}")

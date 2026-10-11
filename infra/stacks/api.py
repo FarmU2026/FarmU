@@ -43,6 +43,9 @@ ROUTE_THROTTLES: dict[str, tuple[int, int]] = {
     "POST /v1/replay": (1, 2),
     "POST /v1/replay/reset": (1, 2),
     "POST /api/farms": (2, 5),
+    "POST /api/farms/{farm_id}/fields": (2, 5),
+    "PATCH /api/farms/{farm_id}/fields/{field_id}": (2, 5),
+    "DELETE /api/farms/{farm_id}/fields/{field_id}": (2, 5),
     "POST /api/farms/{farm_id}/check": (2, 5),
     "POST /api/farms/{farm_id}/fields/{field_id}/ask": (2, 5),
 }
@@ -108,7 +111,8 @@ class Api(Stack):
             description="FieldWatch web API (WS12)",
             cors_preflight=apigw.CorsPreflightOptions(
                 allow_origins=["*"],  # TODO: the CloudFront domain once WS14 lands
-                allow_methods=[apigw.CorsHttpMethod.GET, apigw.CorsHttpMethod.POST, apigw.CorsHttpMethod.OPTIONS],
+                allow_methods=[apigw.CorsHttpMethod.GET, apigw.CorsHttpMethod.POST,
+                               apigw.CorsHttpMethod.PATCH, apigw.CorsHttpMethod.DELETE, apigw.CorsHttpMethod.OPTIONS],
                 allow_headers=["content-type", "authorization"],
                 max_age=Duration.hours(1),
             ),
