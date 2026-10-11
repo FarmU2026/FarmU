@@ -53,6 +53,27 @@ class DiseaseIn(_In):
     season: int
 
 
+class IndexHistoryIn(_In):
+    field_id: str
+    start: C.ISODate
+    end: C.ISODate
+    index: Literal["ndvi", "ndre", "ndmi"] = "ndvi"
+    as_of: C.ISODate | None = Field(default=None, description="Replay date: no scene after it is read (default: end)")
+    region_id: str | None = Field(default=None, description="Problem region from analyze_field; adds its median per pass")
+
+
+class CohortIn(_In):
+    field_id: str
+    as_of: C.ISODate
+
+
+class OverlapIn(_In):
+    field_id: str
+    layer: Literal["field_edge", "pivot_ring", "lowspot", "soil_sandy", "hail_swath"]
+    region_id: str | None = Field(default=None, description="Problem region id from analyze_field (needs as_of)")
+    as_of: C.ISODate | None = Field(default=None, description="Analysis date the region_id came from")
+
+
 class LossIn(_In):
     field_id: str
     affected_acres: float
@@ -129,6 +150,26 @@ def analyze_field(**kwargs) -> C.FieldAnalysisResult:
     return analyze(C.FieldAnalysisRequest.model_validate(kwargs))
 
 
+def get_index_history(**kwargs):
+    from .analysis.history import get_index_history as fn  # lazy: rasterio and scipy load only when the tool runs
+
+    return fn(**kwargs)
+
+
+def compare_to_cohort(**kwargs):
+    from .analysis.history import compare_to_cohort as fn
+
+    return fn(**kwargs)
+
+
+def test_overlap(**kwargs):
+    from .analysis.overlap import test_overlap as fn
+
+    return fn(**kwargs)
+
+
+test_overlap.__test__ = False  # not a pytest test
+
 TOOLS: list[ToolSpec] = [
     # --- live today (tools.py); outputs still untyped dicts, typed by their workstream ---
     ToolSpec("list_fields", "List every field on the farm with its id, name, crop and acres.", "read",
@@ -145,6 +186,18 @@ TOOLS: list[ToolSpec] = [
     ToolSpec("analyze_field", "Deterministic analysis of the latest clear scene on or before as_of: masked indices, "
              "baseline and change z-scores, problem regions with pattern features, gates.", "read",
              C.FieldAnalysisRequest, analyze_field, output_model=C.FieldAnalysisResult, workstream=1),
+    ToolSpec("get_index_history", "Crop-health index (ndvi, ndre or ndmi) per clear satellite pass for a field, with the "
+             "same-weeks-in-prior-seasons expectation and z; adds the problem region's median when region_id is given.",
+             "read", IndexHistoryIn, get_index_history, workstream=1,
+             notes="Returns analysis.history.IndexHistory (kept out of the registry import so scipy loads lazily)."),
+    ToolSpec("compare_to_cohort", "Field crop health vs same-crop neighbor fields on the same pass, as of a date. "
+             "Returns status no_cohort (not an error) when there are no neighbors.", "read", CohortIn,
+             compare_to_cohort, workstream=1,
+             notes="Returns analysis.history.CohortComparison."),
+    ToolSpec("test_overlap", "How much of a problem region lies on a layer (field_edge, pivot_ring, lowspot, "
+             "soil_sandy, hail_swath), the share expected by chance, and a p-value.", "read", OverlapIn,
+             test_overlap, workstream=1,
+             notes="Returns analysis.overlap.LayerOverlap. field_edge and pivot_ring are built in; other layers need a LayerProvider."),
     ToolSpec("get_hail", "Max radar hail size (mm) over a field for a date range, plus nearby ground reports.", "read",
              FieldRangeIn, H.get_hail, output_model=C.HailReport, workstream=3),
     ToolSpec("get_drought", "US Drought Monitor category for a county as of a date.", "read",

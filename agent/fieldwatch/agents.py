@@ -53,7 +53,8 @@ SUPERVISOR_MODEL_ID = os.getenv("FIELDWATCH_SUPERVISOR_MODEL", "")  # D4: Sonnet
 
 # Which read tools each specialist may call (system-design roster, limited to what the registry has today).
 SPECIALIST_TOOLS: dict[str, list[str]] = {
-    "imagery": ["list_fields", "look_at_field", "get_scene_analysis", "analyze_field"],
+    "imagery": ["list_fields", "look_at_field", "get_scene_analysis", "analyze_field", "get_index_history",
+                "compare_to_cohort", "test_overlap"],
     "environment": ["list_fields", "get_weather", "get_hail", "get_drought", "get_soil", "get_soil_profile",
                     "get_field_context"],
     "agronomy": ["list_fields", "get_disease_reports", "get_field_context"],
