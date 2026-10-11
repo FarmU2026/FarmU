@@ -82,3 +82,29 @@ def test_api_stage_is_throttled_with_tighter_limits_on_costly_routes(app):
     # every throttled key is a real route of the API (an unknown key would fail the deploy)
     routes = {r["Properties"]["RouteKey"] for r in t.find_resources("AWS::ApiGatewayV2::Route").values()}
     assert set(rs) <= routes
+
+
+def _reserved(app, stack):
+    """{function logical-id prefix or FunctionName: ReservedConcurrentExecutions or None} for a stack's Lambdas."""
+    out = {}
+    for lid, f in _template(app, stack).find_resources("AWS::Lambda::Function").items():
+        p = f["Properties"]
+        out[p.get("FunctionName", lid)] = p.get("ReservedConcurrentExecutions")
+    return out
+
+
+def test_cost_heavy_lambdas_have_reserved_concurrency(app):
+    api = _reserved(app, "FieldWatch-Api")
+    assert api and set(api.values()) == {10}  # every route-group Lambda
+    assert set(_reserved(app, "FieldWatch-Agent").values()) == {5}  # the session starter
+    scenes = _reserved(app, "FieldWatch-Scenes")
+    assert scenes["fw-scene-analyze-field"] == 10
+    notify = _reserved(app, "FieldWatch-Notifications")
+    assert notify["fw-notify-send"] == 5
+    assert notify["fw-notify-reply"] is None and notify["fw-notify-mirror"] is None
+
+
+def test_total_reserved_concurrency_stays_well_under_the_account_limit(app):
+    total = sum(v or 0 for s in app.node.children if hasattr(s, "template_options")
+                for v in _reserved(app, s.node.id).values())
+    assert 0 < total < 100

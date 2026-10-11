@@ -7,6 +7,9 @@ geo_lambda(): container-image Lambda with the geospatial stack (rasterio, numpy,
     shapely) from infra/docker/geo/Dockerfile, for the field analyzer and anything that reads rasters.
     Needs Docker at deploy time (not at synth).
 
+Both take `reserved_concurrency` (None = unreserved): a cost cap for the functions that start costly work. The
+account limit is 1000 and AWS keeps 100 unreserved, so keep the sum of reservations small.
+
 Handlers live under agent/cloud/..., e.g. handler="cloud.api.farms.handler".
 """
 from __future__ import annotations
@@ -71,7 +74,7 @@ class _LocalPip:
 
 def python_lambda(scope: Construct, cid: str, *, handler: str, requirements: list[str] | None = None,
                   environment: dict[str, str] | None = None, timeout_s: int = 30, memory_mb: int = 512,
-                  **kwargs) -> lambda_.Function:
+                  reserved_concurrency: int | None = None, **kwargs) -> lambda_.Function:
     reqs = BASE_REQUIREMENTS + (requirements or [])
     code = lambda_.Code.from_asset(
         str(AGENT),
@@ -90,6 +93,7 @@ def python_lambda(scope: Construct, cid: str, *, handler: str, requirements: lis
         code=code,
         timeout=Duration.seconds(timeout_s),
         memory_size=memory_mb,
+        reserved_concurrent_executions=reserved_concurrency,
         environment={"PYTHONPATH": "/var/task", **(environment or {})},
         log_group=logs.LogGroup(scope, f"{cid}Logs", retention=logs.RetentionDays.ONE_WEEK,
                                 removal_policy=RemovalPolicy.DESTROY),
@@ -98,7 +102,8 @@ def python_lambda(scope: Construct, cid: str, *, handler: str, requirements: lis
 
 
 def geo_lambda(scope: Construct, cid: str, *, handler: str, environment: dict[str, str] | None = None,
-               timeout_s: int = 90, memory_mb: int = 3008, **kwargs) -> lambda_.DockerImageFunction:
+               timeout_s: int = 90, memory_mb: int = 3008, reserved_concurrency: int | None = None,
+               **kwargs) -> lambda_.DockerImageFunction:
     code = lambda_.DockerImageCode.from_image_asset(
         str(REPO),
         file="infra/docker/geo/Dockerfile",
@@ -113,6 +118,7 @@ def geo_lambda(scope: Construct, cid: str, *, handler: str, environment: dict[st
         architecture=lambda_.Architecture.X86_64,
         timeout=Duration.seconds(timeout_s),
         memory_size=memory_mb,
+        reserved_concurrent_executions=reserved_concurrency,
         environment=environment or {},
         log_group=logs.LogGroup(scope, f"{cid}Logs", retention=logs.RetentionDays.ONE_WEEK,
                                 removal_policy=RemovalPolicy.DESTROY),

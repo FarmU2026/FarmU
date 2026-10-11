@@ -120,7 +120,8 @@ class Api(Stack):
         for group, keys in routes.items():
             cid = "".join(p.capitalize() for p in group.split("_")) + "Fn"
             fn = python_lambda(self, cid, handler=handlers[group], environment=env,
-                               timeout_s=15 if group == "sms_inbound" else 30, memory_mb=512)
+                               timeout_s=15 if group == "sms_inbound" else 30, memory_mb=512,
+                               reserved_concurrency=10)
             self.functions[group] = fn
             integration = HttpLambdaIntegration(f"{cid}Integration", fn)
             for key in keys:
