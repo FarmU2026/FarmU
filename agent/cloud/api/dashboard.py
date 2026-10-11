@@ -78,7 +78,7 @@ def overview(req: Request):
         for inv in _recent_investigations(f["field_id"]):
             if str(inv.get("status", "open")) in OPEN_INVESTIGATION_STATUSES:
                 open_invs.append({k: inv.get(k) for k in ("investigation_id", "field_id", "status", "created_at",
-                                                          "anomaly_id") if inv.get(k) is not None})
+                                                          "anomaly_id", "kind") if inv.get(k) is not None})
     return {"farm_id": farm_id, "fields": fields, "open_investigations": open_invs}
 
 

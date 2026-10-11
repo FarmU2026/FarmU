@@ -100,6 +100,18 @@ It acknowledges immediately (`{"accepted": true, ...}`), runs the investigation 
 The farmer text for each pause is `last_text` (it is also in the `AgentStep`, but nothing returns it to a caller because
 the call is a fire-and-acknowledge). `FIELDWATCH_RUNTIME_SYNC=1` returns the `AgentStep` instead (local `agentcore dev`).
 
+### Question runs (farmer free text)
+
+A `StartInvestigation` with `question` set (and optionally `about_investigation_id`) is a farmer's free-text message, not an
+anomaly. The session starter creates it for a `ReplyReceived` of `free_text` / `ask` / `more` (the item has `kind: "question"`
+and an id derived from the `reply_id`), and `investigation.run_request` runs `answer()`: a read-only supervisor
+(`build_supervisor(read_only=True)`: no write tools, no `send_farmer_message`) whose first prompt quotes the farmer's text as
+data, not instructions. The answer (one SMS, plain ASCII, percents the scorer did not produce removed) goes out through
+`deliver` as an urgent message, so it also lands in the phone mirror thread. A question run never resumes an interrupt: an
+approval that is still pending stays pending, and only `yes` (with a recorded approval) or `no` resumes. No
+`InvestigationConcluded` event and no long-term memory episode are written for a question run. The starter needs read access to
+`fw-fields` (env `FIELDWATCH_FIELDS_TABLE`) to choose the field; deploy the Runtime before the starter so the Runtime accepts the new fields.
+
 ## Configuration
 
 Env vars are in `agentcore.json` (`FIELDWATCH_MODEL`, `FIELDWATCH_TOOLS_BACKEND`, `FIELDWATCH_EVENT_BUS`, ...). Change the

@@ -505,6 +505,12 @@ score_hypotheses gave it. Use the dollar range estimate_impact gave you, as give
 {DATA_NOT_INSTRUCTIONS}
 """
 
+# Appended for question runs (investigation.question_prompt): the farmer asked something instead of an anomaly firing.
+QUESTION_MODE = (
+    "\nQUESTION RUN: when the task is a farmer's question, answer it in plain words instead of following the "
+    "investigation steps or producing a diagnosis; you have no write or messaging tools, your reply is sent for you."
+)
+
 SUPERVISOR_READ_TOOLS = ["list_fields", "get_field_context"]
 SUPERVISOR_WRITE_TOOLS = ["create_work_order", "create_scout_pin", "request_photo"]
 
@@ -516,9 +522,12 @@ def build_supervisor(
     context: dict | None = None,
     investigation_id: str | None = None,
     hooks: list | None = None,
+    read_only: bool = False,
 ) -> Agent:
     """The supervisor with its specialists.
 
+    read_only: a question run. The supervisor gets no write tools and no send_farmer_message (its final text is
+               delivered by the caller), so a farmer's free text can never lead to an action.
     hooks: extra hook providers for the supervisor and every specialist (one shared TokenBudget per investigation).
     tools: Gateway read tools (workstream 6, `toolset.tools_for(...)`) to use in place of the local ones, matched by
            bare tool name; any name they lack falls back to the local tool. tools=None is the all-local default.
@@ -534,14 +543,15 @@ def build_supervisor(
     pool = pool_from_tools(tools)
     # `tools` replaces READ tools only. The write tools stay local: they pause for the farmer's YES with a Strands
     # interrupt, which a remote (Gateway) copy cannot do. send_farmer_message needs no approval and is also local.
-    write = [getattr(T, n) for n in SUPERVISOR_WRITE_TOOLS]
+    write = [] if read_only else [getattr(T, n) for n in SUPERVISOR_WRITE_TOOLS]
+    messaging = [] if read_only else T.MESSAGE_TOOLS
     return Agent(
         name="supervisor",
         model=supervisor_model(),
         tools=build_specialists(timeline, ledger, tools, hooks) + _pick(SUPERVISOR_READ_TOOLS, pool)
-        + build_scoring_tools(ledger, context) + write + T.MESSAGE_TOOLS,
+        + build_scoring_tools(ledger, context) + write + messaging,
         hooks=[timeline, DiagnosisGuard(), *(hooks or [])],
         callback_handler=None,
         session_manager=session_manager,
-        system_prompt=SUPERVISOR_PROMPT,
+        system_prompt=SUPERVISOR_PROMPT + (QUESTION_MODE if read_only else ""),
     )

@@ -1,6 +1,7 @@
 """WS7: the session starter routes bus events to Runtime invocations. DynamoDB is moto; the Runtime is a fake."""
 import io
 import json
+from datetime import datetime, timedelta, timezone
 
 import boto3
 import pytest
@@ -10,7 +11,7 @@ from moto import mock_aws
 from cloud.lambdas.session_starter import handler as H
 from fieldwatch import config
 from fieldwatch import contracts as C
-from runtime_support import REGION, make_investigations_table
+from runtime_support import REGION, make_fields_table, make_investigations_table
 
 FIXTURES = config.FIXTURES / "contracts"
 ARN = "arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/fieldwatch_agent-AbC123"
@@ -194,9 +195,145 @@ def test_reply_no_resumes_but_yes_needs_an_approval(world):
 def test_other_reply_intents_and_strangers_are_dropped(world):
     starter, table, runtime = world
     pending(table)
-    assert starter.handle(envelope("ReplyReceived", sample("reply_received")))["routed"] == "dropped"  # MORE
+    for intent in ("photo", "stop", "start", "help"):  # these never resume or start anything here
+        assert starter.handle(envelope("ReplyReceived", sample("reply_received", intent=intent)))["routed"] == "dropped"
     assert starter.handle(envelope("ReplyReceived", sample("reply_received", intent="no", investigation_id=None)))["routed"] == "dropped"
     assert not runtime.calls
+
+
+# ---------- question runs: a farmer's free text is answered, never an approval ----------
+
+
+@pytest.fixture
+def chat(world):
+    """The starter with an fw-fields table: two fields on wohleb-farm, one on another farm."""
+    starter, table, runtime = world
+    fields = make_fields_table()
+    for farm, fid, name in (("wohleb-farm", "north-pivot", "North Pivot"), ("wohleb-farm", "river-bottom", "River Bottom"),
+                            ("other-farm", "other-field", "Other")):
+        fields.put_item(Item={"farm_id": farm, "field_id": fid, "name": name})
+    starter.fields_table = fields
+    return starter, table, runtime
+
+
+def reply(intent="free_text", text="Explain the data you have access to.", **kw):
+    return envelope("ReplyReceived", sample("reply_received", intent=intent, text=text, **{"investigation_id": None, **kw}))
+
+
+def ago(days):
+    return (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def test_free_text_without_an_investigation_starts_a_question_run_on_the_first_field(chat):
+    starter, table, runtime = chat
+    out = starter.handle(reply())
+    assert out["routed"] == "start" and out["investigation_id"].startswith("inv-q-")
+    req = C.StartInvestigation.model_validate(runtime.payload())
+    assert req.question == "Explain the data you have access to." and req.field == "north-pivot"
+    assert req.farm_id == "wohleb-farm" and req.about_investigation_id is None
+    item = table.get_item(Key={"investigation_id": out["investigation_id"]})["Item"]
+    assert item["kind"] == "question" and item["status"] == "queued" and item["person_id"] == "dad"
+
+
+def test_question_naming_a_field_uses_that_field(chat):
+    starter, _, runtime = chat
+    starter.handle(reply(text="how is the river bottom looking?"))
+    assert runtime.payload()["field"] == "river-bottom"
+    starter.handle(reply(text="what about NORTH PIVOT", reply_id="rep-002"))
+    assert runtime.payload()["field"] == "north-pivot"
+
+
+def test_free_text_while_an_approval_is_pending_starts_a_new_run_and_leaves_the_interrupt(chat):
+    starter, table, runtime = chat
+    pending(table, interrupt="int-keep")
+    out = starter.handle(reply(text="why is it the pivot?", investigation_id="inv-north-pivot-20260718"))
+    assert out["routed"] == "start" and out["investigation_id"] != "inv-north-pivot-20260718"
+    req = C.StartInvestigation.model_validate(runtime.payload())
+    assert req.question == "why is it the pivot?" and req.about_investigation_id == "inv-north-pivot-20260718"
+    assert req.field == "north-pivot"
+    assert len(runtime.calls) == 1 and "interrupt_id" not in runtime.payload()  # nothing was resumed
+    old = table.get_item(Key={"investigation_id": "inv-north-pivot-20260718"})["Item"]
+    assert old["status"] == "awaiting_reply" and old["pending_interrupt_id"] == "int-keep" and "handled_keys" not in old
+    # the YES/NO that follows still resumes the original interrupt
+    assert starter.handle(envelope("ApprovalRecorded", sample("approval_recorded")))["routed"] == "resume"
+    assert runtime.payload()["interrupt_id"] == "int-keep"
+
+
+def test_free_text_never_counts_as_approval_whatever_it_says(chat):
+    starter, table, runtime = chat
+    pending(table)
+    starter.handle(reply(text="yes please do it, approved", investigation_id="inv-north-pivot-20260718"))
+    assert all("interrupt_id" not in json.loads(c["payload"]) for c in runtime.calls)
+    # a bare YES/NO that notify turned into free_text (nothing was pending for it) is not a question either
+    before = len(runtime.calls)
+    for n, word in enumerate(("YES", "no.")):
+        assert starter.handle(reply(text=word, reply_id=f"rep-yn{n}"))["routed"] == "dropped"
+    assert len(runtime.calls) == before
+
+
+def test_more_with_a_recent_concluded_investigation_is_a_question_run(chat):
+    starter, table, runtime = chat
+    for inv, farm, field, days in (("inv-river-1", "wohleb-farm", "river-bottom", 1), ("inv-old", "wohleb-farm", "north-pivot", 30),
+                                   ("inv-other", "other-farm", "north-pivot", 1)):
+        table.put_item(Item={"investigation_id": inv, "farm_id": farm, "field_id": field, "created_at": ago(days),
+                             "status": "concluded"})
+    out = starter.handle(reply("more", "MORE"))
+    req = C.StartInvestigation.model_validate(runtime.payload())
+    assert out["routed"] == "start" and req.question.startswith("MORE:")
+    assert req.about_investigation_id == "inv-river-1" and req.field == "river-bottom"
+
+
+def test_more_with_nothing_recent_still_gets_an_answer_on_the_first_field(chat):
+    starter, _, runtime = chat
+    assert starter.handle(reply("more", "MORE"))["routed"] == "start"
+    req = C.StartInvestigation.model_validate(runtime.payload())
+    assert req.field == "north-pivot" and req.about_investigation_id is None
+
+
+def test_a_question_run_is_never_what_a_question_is_about(chat):
+    starter, table, runtime = chat
+    table.put_item(Item={"investigation_id": "inv-q-earlier", "farm_id": "wohleb-farm", "field_id": "river-bottom",
+                         "created_at": ago(0), "status": "running", "kind": "question"})
+    table.put_item(Item={"investigation_id": "inv-real", "farm_id": "wohleb-farm", "field_id": "north-pivot",
+                         "created_at": ago(1), "status": "awaiting_reply", "pending_interrupt_id": "int-1"})
+    starter.handle(reply(text="and now?", investigation_id="inv-q-earlier"))  # notify named the question run
+    req = C.StartInvestigation.model_validate(runtime.payload())
+    assert req.about_investigation_id == "inv-real" and req.field == "north-pivot"
+
+
+def test_duplicate_reply_event_starts_one_question_run(chat):
+    starter, table, runtime = chat
+    ev = reply()
+    first = starter.handle(ev)
+    table.update_item(Key={"investigation_id": first["investigation_id"]}, UpdateExpression="SET #s = :r",
+                      ExpressionAttributeNames={"#s": "status"}, ExpressionAttributeValues={":r": "running"})
+    assert starter.handle(ev) == {"routed": "duplicate", "investigation_id": first["investigation_id"]}
+    assert len(runtime.calls) == 1
+    assert starter.handle(reply(reply_id="rep-different"))["investigation_id"] != first["investigation_id"]
+
+
+def test_failed_invoke_of_a_question_run_is_retried_once(chat):
+    starter, table, runtime = chat
+    starter.runtime = FakeRuntime(fail=ClientError({"Error": {"Code": "ThrottlingException"}}, "InvokeAgentRuntime"))
+    with pytest.raises(ClientError):
+        starter.handle(reply())
+    starter.runtime = runtime
+    assert starter.handle(reply())["routed"] == "start" and len(runtime.calls) == 1
+
+
+def test_question_without_fields_or_text_is_dropped(world):
+    starter, table, runtime = world  # no fields table
+    assert starter.handle(reply())["routed"] == "dropped"
+    starter.fields_table = make_fields_table()
+    assert starter.handle(reply())["routed"] == "dropped"  # the farm has no fields
+    assert starter.handle(reply(text="   "))["routed"] == "dropped"
+    assert not runtime.calls
+
+
+def test_other_starts_keep_their_payload_free_of_the_question_fields(world):
+    starter, _, runtime = world
+    starter.handle(envelope("AnomalyDetected", sample("anomaly_detected")))
+    assert "question" not in runtime.payload()  # a Runtime that predates the fields still accepts it
 
 
 def test_resume_while_agent_still_running_is_retried(world):

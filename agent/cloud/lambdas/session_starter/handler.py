@@ -5,6 +5,14 @@ EventBridge rules on the `fieldwatch` bus send these here:
   ApprovalRecorded, ReplyReceived (yes/no)                     -> resume the agent at its pending interrupt
   PhotoReceived, DocumentReceived, ActionCompleted             -> recorded on the item (the agent has no contract for
                                                                    them yet; see the WS7 report)
+  ReplyReceived (free_text / ask / more)                       -> a question run (below)
+
+Question runs: a farmer's free-text message (or MORE / ASK) is never an approval and never resumes the agent. It starts
+a NEW short run, a StartInvestigation with `question` set (and `about_investigation_id` when the message belongs to an
+open or recently concluded investigation), whose read-only agent answers by text. An approval that is still pending
+stays pending, untouched. The field is the one the text names, else the investigation's, else the farm's first.
+The run's id derives from the reply_id (a duplicate event starts nothing) and its fw-investigations item has
+kind "question". Only yes (with a recorded approval) and no resume an interrupt.
 
 The agent acknowledges at once and works in the background, so this Lambda only waits for the ack.
 Retries: failures raise, so EventBridge retries and finally sends the event to the rule's dead-letter queue.
@@ -19,8 +27,10 @@ import hashlib
 import json
 import logging
 import os
-from datetime import datetime, timezone
+import re
+from datetime import datetime, timedelta, timezone
 
+from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 from pydantic import ValidationError
 
@@ -33,6 +43,11 @@ log.setLevel(logging.INFO)
 SESSION_PREFIX = "fieldwatch-session-"
 MIN_SESSION_ID = 33  # AgentCore requires at least 33 characters
 RECORD_ONLY = {"PhotoReceived", "DocumentReceived", "ActionCompleted"}
+QUESTION_INTENTS = {"free_text", "ask", "more"}
+YES_NO_WORDS = {"YES", "Y", "NO", "N"}  # notify turns a YES/NO with nothing pending into free_text; not a question
+MORE_QUESTION = "MORE: explain the last finding in more detail"
+CONTEXT_STATUSES = {"awaiting_reply", "awaiting_upload", "concluded", "running", "resuming"}
+CONTEXT_DAYS = 7  # how far back "the last finding" reaches
 
 
 class NotReady(Exception):
@@ -55,6 +70,11 @@ def investigation_id_for_anomaly(anomaly_id: str) -> str:
     return f"inv-{anomaly_id}"
 
 
+def question_id_for(reply_id: str) -> str:
+    """inv-q-<hash of the reply id>: deterministic, so a retried ReplyReceived finds its run, not a second one."""
+    return "inv-q-" + hashlib.sha1(reply_id.encode()).hexdigest()[:20]
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -64,8 +84,9 @@ def _is_conditional_failure(e: ClientError) -> bool:
 
 
 class Starter:
-    def __init__(self, table, runtime, runtime_arn_loader):
+    def __init__(self, table, runtime, runtime_arn_loader, fields_table=None):
         self.table = table
+        self.fields_table = fields_table  # fw-fields: where a question run finds the farm's fields
         self.runtime = runtime
         self._arn_loader = runtime_arn_loader
         self._arn = None
@@ -111,11 +132,12 @@ class Starter:
         return {"routed": "dropped", "event": kind, "reason": why}
 
     # ------------------------------------------------------------ start
-    def _start(self, req: C.StartInvestigation, *, anomaly_id: str | None = None, replay: bool = False) -> dict:
+    def _start(self, req: C.StartInvestigation, *, anomaly_id: str | None = None, replay: bool = False,
+               kind: str | None = None, person_id: str | None = None) -> dict:
         inv = req.investigation_id
         item = InvestigationRecord(investigation_id=inv, farm_id=req.farm_id, field_id=req.field, status="queued",
-                                   created_at=_now(), updated_at=_now(), replay=replay,
-                                   anomaly_id=anomaly_id).to_item()
+                                   created_at=_now(), updated_at=_now(), replay=replay, anomaly_id=anomaly_id,
+                                   kind=kind, person_id=person_id).to_item()
         try:
             self.table.put_item(Item=item, ConditionExpression="attribute_not_exists(investigation_id)")
         except ClientError as e:
@@ -126,11 +148,14 @@ class Starter:
                 log.info("investigation %s already exists (%s); not starting again", inv, existing.get("status"))
                 return {"routed": "duplicate", "investigation_id": inv}
             # still queued: an earlier attempt created the item but never reached the agent. Try again.
-        self._invoke(inv, req.model_dump_json())
+        # the question fields are left out unless set, so a Runtime that predates them still accepts every other start
+        self._invoke(inv, req.model_dump_json(exclude=None if req.question else {"question", "about_investigation_id"}))
         return {"routed": "start", "investigation_id": inv, "session_id": session_id_for(inv)}
 
     # ------------------------------------------------------------ resume
     def _reply(self, ev: C.ReplyReceived) -> dict:
+        if ev.intent in QUESTION_INTENTS:
+            return self._question(ev)  # never resumes anything: free text is not an approval
         if not ev.investigation_id:
             return self._drop("ReplyReceived", "not_for_an_investigation")
         if ev.intent == "no":
@@ -141,6 +166,60 @@ class Starter:
                 return self._drop("ReplyReceived", "yes_without_approval")
             return self._resume(ev.investigation_id, "YES", approval_id=ev.approval_id, dedupe_key=ev.approval_id)
         return self._drop("ReplyReceived", f"intent_{ev.intent}_does_not_resume_yet")
+
+    # ------------------------------------------------------------ questions
+    def _question(self, ev: C.ReplyReceived) -> dict:
+        """Start a question run for a farmer's message. Any open investigation's pending interrupt is not touched."""
+        text = " ".join(ev.text.split())
+        if not text or (ev.intent == "free_text" and text.upper().rstrip(".!") in YES_NO_WORDS):
+            return self._drop("ReplyReceived", "nothing_to_answer")
+        question = MORE_QUESTION if ev.intent == "more" else text[:480]
+        fields = self._fields(ev.farm_id)
+        about = self._about(ev, fields)
+        field = self._pick_field(text, fields, about)
+        if not field:
+            return self._drop("ReplyReceived", "question_without_a_field")
+        req = C.StartInvestigation(investigation_id=question_id_for(ev.reply_id), farm_id=ev.farm_id, field=field,
+                                   question=question, about_investigation_id=about["investigation_id"] if about else None)
+        return self._start(req, kind="question", person_id=ev.person_id)
+
+    def _fields(self, farm_id: str) -> list[dict]:
+        if self.fields_table is None:
+            return []
+        return self.fields_table.query(KeyConditionExpression=Key("farm_id").eq(farm_id)).get("Items", [])
+
+    def _about(self, ev: C.ReplyReceived, fields: list[dict]) -> dict | None:
+        """The investigation a question is about: the one the reply names, else the farm's newest recent one.
+        Question runs themselves never count, and neither does another farm's item."""
+        if ev.investigation_id:
+            item = self.table.get_item(Key={"investigation_id": ev.investigation_id}).get("Item")
+            if item and item.get("farm_id") == ev.farm_id and item.get("kind") != "question":
+                return item
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=CONTEXT_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        found = []
+        for f in fields:
+            page = self.table.query(IndexName="by-field", KeyConditionExpression=Key("field_id").eq(f["field_id"]),
+                                    ScanIndexForward=False, Limit=10)
+            found += [i for i in page.get("Items", []) if i.get("farm_id") == ev.farm_id and i.get("kind") != "question"
+                      and i.get("status") in CONTEXT_STATUSES and i.get("created_at", "") >= cutoff]
+        return max(found, key=lambda i: i["created_at"], default=None)
+
+    @staticmethod
+    def _pick_field(text: str, fields: list[dict], about: dict | None) -> str | None:
+        """The field the text names (case-insensitive, by name or id; longest name wins), else the investigation's
+        field, else the farm's first."""
+        low = text.lower()
+
+        def mentioned(f: dict) -> bool:  # whole words, so a field called "A" is not found in every sentence
+            return any(n and re.search(rf"(?<!\w){re.escape(n)}(?!\w)", low)
+                       for n in (str(f.get("name", "")).lower(), f["field_id"].lower()))
+
+        named = [f for f in fields if mentioned(f)]
+        if named:
+            return max(named, key=lambda f: len(str(f.get("name", "")))).get("field_id")
+        if about and about.get("field_id"):
+            return about["field_id"]
+        return fields[0]["field_id"] if fields else None
 
     def _claim(self, inv: str, key: str) -> str | None:
         """Atomically take the pending interrupt id (once per dedupe key). None if there's nothing to take."""
@@ -244,9 +323,10 @@ def _default_starter() -> Starter:
         return boto3.client("ssm", region_name=region).get_parameter(Name=param)["Parameter"]["Value"]
 
     table = boto3.resource("dynamodb", region_name=region).Table(os.getenv("FIELDWATCH_INVESTIGATIONS_TABLE", Tables.INVESTIGATIONS))
+    fields = boto3.resource("dynamodb", region_name=region).Table(os.getenv("FIELDWATCH_FIELDS_TABLE", Tables.FIELDS))
     runtime = boto3.client("bedrock-agentcore", region_name=region,
                            config=Config(read_timeout=50, connect_timeout=5, retries={"max_attempts": 1}))
-    return Starter(table, runtime, load_arn)
+    return Starter(table, runtime, load_arn, fields)
 
 
 def handler(event, context=None) -> dict:
