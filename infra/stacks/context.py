@@ -10,8 +10,8 @@ A Step Functions STANDARD state machine, started by the web API after fields are
     output  {farm_id, results: [{field_id, status, failed_stages, stub_stages}]}
 
 Lambda code: agent/cloud/lambdas/context/. Stage Lambdas call the registry/adapters, so Kurt's and Aaron's
-implementations land without changing this stack. The baseline stage is a light Lambda while WS1's baseline
-is a stub; when it needs rasterio, switch `BASELINE_USES_GEO_IMAGE` (needs Docker at deploy time).
+implementations land without changing this stack. The baseline stage runs on the geo image because WS1's
+real baseline reads Sentinel-2 with rasterio (`BASELINE_USES_GEO_IMAGE`; needs Docker at deploy time).
 """
 from aws_cdk import CfnOutput, Duration, RemovalPolicy, Stack, Tags
 from aws_cdk import aws_iam as iam
@@ -23,7 +23,7 @@ from constructs import Construct
 from .access import BOUNDARY_NAME
 from .common import geo_lambda, python_lambda
 
-BASELINE_USES_GEO_IMAGE = False
+BASELINE_USES_GEO_IMAGE = True
 MAP_CONCURRENCY = 5
 HANDLER_PREFIX = "cloud.lambdas.context"
 # One bundle for all eight Lambdas (CDK caches the bundle by source path, so per-function lists would not

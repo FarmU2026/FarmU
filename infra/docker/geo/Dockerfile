@@ -2,6 +2,9 @@
 # Built from the repo root by infra/stacks/common.py geo_lambda(); each function sets its own handler (cmd).
 FROM public.ecr.aws/lambda/python:3.12
 
+# The Amazon Linux 2023 base image lacks libexpat, which the GDAL bundled in the geo wheels loads.
+RUN dnf install -y expat && dnf clean all
+
 COPY infra/docker/geo/requirements.txt /tmp/geo-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/geo-requirements.txt
 
