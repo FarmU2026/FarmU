@@ -248,5 +248,5 @@ def test_supervisor_takes_read_tools_by_name_and_keeps_local_write_tools(monkeyp
     monkeypatch.setattr(agents, "Agent", lambda **kw: seen.update(kw) or object())
     agents.build_supervisor(ToolTimeline(lambda e: None), tools=remote)
     names = {getattr(t, "tool_name", None) for t in seen["tools"]}
-    assert {"create_work_order", "create_scout_pin", "request_photo", "send_farmer_message"} <= names
+    assert {"create_work_order", "create_scout_pin", "send_farmer_message"} <= names and "request_photo" not in names
     assert all(any(t is w for t in seen["tools"]) for w in T.WRITE_TOOLS + T.MESSAGE_TOOLS)
