@@ -21,6 +21,8 @@ GITHUB_REPOS = ["FarmU2026@340763669/FarmU@1413406950", "FarmU2026/FarmU", "kdum
 GITHUB_HOST = "token.actions.githubusercontent.com"
 BOUNDARY_NAME = "fieldwatch-boundary"
 DEVELOPERS = ["kurt", "aaron"]
+PROTECTED_PARAMS = ["link-signing-key", "dashboard-passcode", "nass-api-key", "runtime-arn", "gateway-url", "bucket",
+                    "sessions-bucket"]
 
 
 class Access(Stack):
@@ -89,9 +91,20 @@ class Access(Stack):
               "cloudwatch:Get*", "cloudwatch:List*", "cloudwatch:Describe*",
               "xray:Get*", "xray:BatchGet*", "states:Describe*", "states:List*", "states:StartExecution",
               "scheduler:Get*", "scheduler:List*", "ssm:GetParameter", "sts:GetCallerIdentity"], ["*"]),
+            # Developers manage their own settings and secrets under /fieldwatch/ (e.g. the Twilio auth token;
+            # SecureStrings use the AWS-managed aws/ssm key, so no KMS grant is needed). Protected ones are denied below.
+            (["ssm:PutParameter", "ssm:DeleteParameter", "ssm:AddTagsToResource", "ssm:GetParameters",
+              "ssm:GetParametersByPath", "ssm:GetParameterHistory", "ssm:DescribeParameters"],
+             [f"arn:aws:ssm:{self.region}:{self.account}:parameter/fieldwatch/*"]),
         ]
         for actions, resources in statements:
             dev.add_to_policy(iam.PolicyStatement(actions=actions, resources=resources))
+        dev.add_to_policy(iam.PolicyStatement(actions=["ssm:DescribeParameters"], resources=["*"]))  # not resource-scoped
+        # Secrets Caleb owns and values CDK writes: overwriting them breaks links, sign-in or the agent's startup.
+        dev.add_to_policy(iam.PolicyStatement(
+            effect=iam.Effect.DENY, actions=["ssm:PutParameter", "ssm:DeleteParameter"],
+            resources=[f"arn:aws:ssm:{self.region}:{self.account}:parameter/fieldwatch/{name}" for name in PROTECTED_PARAMS],
+        ))
 
         # --- Developer users: no credentials here; Caleb creates them in the console ---
         for name in DEVELOPERS:
