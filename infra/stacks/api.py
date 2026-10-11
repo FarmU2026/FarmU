@@ -3,12 +3,18 @@
 Route groups and their routes come from agent/cloud/api/routes.py (one source of truth, unit-tested
 against the handlers' routers). State lives in the shared DataPlane (fw- tables, bucket, bus).
 
-Optional hand-off targets owned by other lanes. Each is a constructor argument (app.py can wire a
-stack's resource in later) or a CDK context value; unset means the API skips that hand-off:
-    -c sceneQueueArn=arn:aws:sqs:us-west-2:<acct>:fw-scene-queue        (WS2 scene pipeline)
-    -c contextStateMachineArn=arn:aws:states:us-west-2:<acct>:stateMachine:<name>   (WS15)
-    -c replayFunctionName=<fn>   -c resetFunctionName=<fn>              (WS2 replay / reset Lambdas)
-    -c sendFunctionName=<fn>                                           (WS9 notify send Lambda)
+Hand-off targets owned by other lanes come from the stack objects app.py passes in
+(`Api(..., scenes=scenes, context=context, notifications=notifications)`); the env var names are
+fieldwatch.interfaces.Env. Each can also be a CDK context value (overrides the stack); unset means the API
+skips that hand-off:
+    scenes.check_fn / -c checkFunctionName=<fn>      FIELDWATCH_CHECK_FN   ("check now", sign-up)
+    scenes.replay_fn / -c replayFunctionName=<fn>    FIELDWATCH_REPLAY_FN  (POST /v1/replay)
+    scenes.reset_fn / -c resetFunctionName=<fn>      FIELDWATCH_RESET_FN   (POST /v1/replay/reset)
+    context.state_machine / -c contextStateMachineArn=<arn>   FIELDWATCH_CONTEXT_SM_ARN (WS15)
+    notifications.send / -c sendFunctionName=<fn>    FIELDWATCH_SEND_FN    (WS9 send)
+    notifications.mirror / -c mirrorFunctionName=<fn> FIELDWATCH_MIRROR_FN (phone panel / mirror reply)
+    notifications.reply / -c notifyReplyFunctionName=<fn> FIELDWATCH_NOTIFY_REPLY_FN (POST /sms/inbound is
+                                                     forwarded to WS9's webhook handler)
     -c smsProvider=twilio  -c smsFrom=+1...                             (shown by GET /api/status)
     -c twilioWebhookUrl=https://...                                     (only behind a custom domain)
 SSM parameters read at runtime (create by hand; CloudFormation can't create SecureStrings):
@@ -36,30 +42,38 @@ def _load_routes() -> tuple[dict[str, list[str]], dict[str, str]]:
     return mod.ROUTES, mod.HANDLERS
 
 
-def _queue_url(arn: str) -> str:
-    _, _, _, region, account, name = arn.split(":", 5)
-    return f"https://sqs.{region}.amazonaws.com/{account}/{name}"
-
-
 class Api(Stack):
-    def __init__(self, scope: Construct, construct_id: str, *, data, scene_queue_arn: str | None = None,
-                 context_state_machine_arn: str | None = None, replay_function_name: str | None = None,
-                 reset_function_name: str | None = None, send_function_name: str | None = None, **kwargs) -> None:
+    def __init__(self, scope: Construct, construct_id: str, *, data, scenes=None, context=None, notifications=None,
+                 **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
         Tags.of(self).add("project", "fieldwatch")
         iam.PermissionsBoundary.of(self).apply(
             iam.ManagedPolicy.from_managed_policy_name(self, "Boundary", BOUNDARY_NAME))
 
-        def opt(value: str | None, key: str) -> str:
-            return (value or self.node.try_get_context(key) or "").strip()
+        def opt(key: str) -> str:
+            return str(self.node.try_get_context(key) or "").strip()
 
-        queue_arn = opt(scene_queue_arn, "sceneQueueArn")
-        sm_arn = opt(context_state_machine_arn, "contextStateMachineArn")
-        fns = {
-            "FIELDWATCH_REPLAY_FN": opt(replay_function_name, "replayFunctionName"),
-            "FIELDWATCH_RESET_FN": opt(reset_function_name, "resetFunctionName"),
-            "FIELDWATCH_SEND_FN": opt(send_function_name, "sendFunctionName"),
+        def target(obj, attr: str, key: str):
+            """(function name for the env, the Function to grant invoke on or None) from context or a stack."""
+            name = opt(key)
+            if name:
+                return name, None
+            fn = getattr(obj, attr, None) if obj is not None else None
+            return (fn.function_name, fn) if fn is not None else ("", None)
+
+        sm = getattr(context, "state_machine", None)
+        sm_arn = opt("contextStateMachineArn") or (sm.state_machine_arn if sm is not None else "")
+        # env var -> (function name, Function or None), and which route groups may invoke it
+        targets = {
+            "FIELDWATCH_CHECK_FN": (*target(scenes, "check_fn", "checkFunctionName"), ("farms",)),
+            "FIELDWATCH_REPLAY_FN": (*target(scenes, "replay_fn", "replayFunctionName"), ("dashboard",)),
+            "FIELDWATCH_RESET_FN": (*target(scenes, "reset_fn", "resetFunctionName"), ("dashboard",)),
+            "FIELDWATCH_SEND_FN": (*target(notifications, "send", "sendFunctionName"), ("farms", "pages", "dashboard")),
+            "FIELDWATCH_MIRROR_FN": (*target(notifications, "mirror", "mirrorFunctionName"), ("farms", "dashboard")),
+            "FIELDWATCH_NOTIFY_REPLY_FN": (*target(notifications, "reply", "notifyReplyFunctionName"),
+                                           ("sms_inbound",)),
         }
+        fns = {k: v[0] for k, v in targets.items()}
 
         env = {
             "FIELDWATCH_BUCKET": data.bucket.bucket_name,
@@ -67,11 +81,10 @@ class Api(Stack):
             "FIELDWATCH_TABLE_PREFIX": "fw-",
             "FIELDWATCH_APPROVALS_BACKEND": "dynamo",  # fieldwatch/approvals.py: fw-approvals, not the local JSON file
             "FIELDWATCH_LINK_KEY_PARAM": "/fieldwatch/link-signing-key",
-            "FIELDWATCH_SCENE_QUEUE_URL": _queue_url(queue_arn) if queue_arn else "",
             "FIELDWATCH_CONTEXT_SM_ARN": sm_arn,
-            "FIELDWATCH_SMS_PROVIDER": opt(None, "smsProvider") or "none",
-            "FIELDWATCH_SMS_FROM": opt(None, "smsFrom"),
-            "FIELDWATCH_TWILIO_WEBHOOK_URL": opt(None, "twilioWebhookUrl"),
+            "FIELDWATCH_SMS_PROVIDER": opt("smsProvider") or "none",
+            "FIELDWATCH_SMS_FROM": opt("smsFrom"),
+            "FIELDWATCH_TWILIO_WEBHOOK_URL": opt("twilioWebhookUrl"),
             **fns,
         }
         env = {k: v for k, v in env.items() if v}
@@ -119,16 +132,18 @@ class Api(Stack):
                 t["fw-actions"].grant_read_write_data(fn)
                 t["fw-uploads"].grant_read_write_data(fn)
                 data.bucket.grant_put(fn, "uploads/*")
-            if queue_arn and group in ("farms", "dashboard"):
-                fn.add_to_role_policy(iam.PolicyStatement(actions=["sqs:SendMessage"], resources=[queue_arn]))
             if sm_arn and group == "farms":
                 fn.add_to_role_policy(iam.PolicyStatement(actions=["states:StartExecution"], resources=[sm_arn]))
-            invoke = [fns["FIELDWATCH_SEND_FN"]]
-            if group == "dashboard":
-                invoke += [fns["FIELDWATCH_REPLAY_FN"], fns["FIELDWATCH_RESET_FN"]]
-            arns = [f if f.startswith("arn:") else self.format_arn(service="lambda", resource="function",
-                                                                  resource_name=f, arn_format=ArnFormat.COLON_RESOURCE_NAME)
-                    for f in invoke if f]
+            arns = []
+            for name, target_fn, groups in targets.values():
+                if not name or group not in groups:
+                    continue
+                if target_fn is not None:
+                    target_fn.grant_invoke(fn)
+                else:
+                    arns.append(name if name.startswith("arn:") else self.format_arn(
+                        service="lambda", resource="function", resource_name=name,
+                        arn_format=ArnFormat.COLON_RESOURCE_NAME))
             if arns:
                 fn.add_to_role_policy(iam.PolicyStatement(actions=["lambda:InvokeFunction"], resources=arns))
 

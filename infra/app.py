@@ -18,6 +18,7 @@ from stacks.context import Context
 from stacks.data_plane import DataPlane
 from stacks.feed import Feed
 from stacks.frontend import Frontend
+from stacks.notifications import Notifications
 from stacks.scenes import Scenes
 from stacks.tools import Tools
 
@@ -30,7 +31,7 @@ data = DataPlane(app, "FieldWatch-DataPlane", env=env)
 Access(app, "FieldWatch-Access", data=data, env=env)
 
 # --- pipelines ---
-Scenes(app, "FieldWatch-Scenes", data=data, env=env)  # WS2 scene pipeline + replay
+scenes = Scenes(app, "FieldWatch-Scenes", data=data, env=env)  # WS2 scene pipeline + replay
 context = Context(app, "FieldWatch-Context", data=data, env=env)  # WS15; context.state_machine for the web API
 
 # --- agents and tools ---
@@ -38,10 +39,13 @@ Tools(app, "FieldWatch-Tools", data=data, env=env)  # WS6 Gateway + tool Lambda
 Agent(app, "FieldWatch-Agent", data=data, env=env)  # WS7 session starter (agent itself: AgentCore CLI)
 
 # --- interaction ---
-Feed(app, "FieldWatch-Feed", data=data, env=env)  # WS13 live feed
-Api(app, "FieldWatch-Api", data=data, env=env)  # WS12 web API (HTTP API + Lambdas)
-Frontend(app, "FieldWatch-Frontend", env=env)  # WS14 web/ on S3 + CloudFront
+notifications = Notifications(app, "FieldWatch-Notifications", data=data, env=env)  # WS9 send + reply
+feed = Feed(app, "FieldWatch-Feed", data=data, env=env)  # WS13 live feed
+# Stack objects, not -c strings: the API calls the scenes/context/notify Lambdas through interfaces.Env names.
+api = Api(app, "FieldWatch-Api", data=data, scenes=scenes, context=context, notifications=notifications,
+          env=env)  # WS12 web API (HTTP API + Lambdas)
+Frontend(app, "FieldWatch-Frontend", api=api, feed=feed, env=env)  # WS14 web/ on S3 + CloudFront; config.js from api/feed
 
-# Still to come: Hazards (WS3, Kurt), Notifications (WS9, Kurt).
+# Still to come: Hazards (WS3, Kurt).
 
 app.synth()

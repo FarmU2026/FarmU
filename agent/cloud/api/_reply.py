@@ -1,25 +1,24 @@
-"""Inbound reply hand-off (SMS webhook and the web phone panel / mirror reply).
+"""Inbound reply hand-off (the web phone panel / dashboard mirror reply, and SMS when WS9 isn't wired).
 
-Preferred path: the notifications lane (WS9, Kurt) provides
+Preferred path: the notifications lane (WS9) through `interfaces.notify()` (interfaces.NotifyAPI):
 
-    fieldwatch.notify.inbound.handle(from_phone: str, body: str, channel: str) -> dict
-        channel: "sms" (Twilio webhook, already signature-checked and deduped on MessageSid by the API)
-                 or "mirror" (typed into the web phone panel; treat exactly like an SMS).
-        Does the reply-handler steps in docs/implementation-specs.md "Reply handler": person lookup by
-        phone, intents, STOP/HELP, approval matching via approvals.record_decision, ReplyReceived /
-        ApprovalRecorded / MessageReceived. Returns a small dict, e.g. {"status": "...", "intent": "..."}.
-        It may send texts (unknown number, HELP) through the send path; the API never does.
+    notify().reply(InboundMessage(provider_message_id="mirror:<id>", from_phone, body, received_at)) -> dict
+        {status, message_id, response_text}. The reply handler does person lookup by phone, intents,
+        STOP/HELP, approval matching via approvals.record_decision, ReplyReceived / ApprovalRecorded /
+        MessageReceived. Deployed: the fw-notify-mirror Lambda (FIELDWATCH_MIRROR_FN, with FIELDWATCH_SEND_FN).
 
-Until that module exists, `fallback()` does a minimal version so the demo loop works.
+Texts from Twilio go to WS9's own webhook handler (sms_inbound.py forwards to FIELDWATCH_NOTIFY_REPLY_FN).
+When the notify lane isn't configured, `fallback()` does a minimal version so the demo loop works.
 """
 from __future__ import annotations
 
-import importlib
 from datetime import datetime, timedelta, timezone
 
 from boto3.dynamodb.conditions import Key
 
 from fieldwatch import contracts as C
+from fieldwatch import interfaces
+from fieldwatch.interfaces import OPEN_INVESTIGATION_STATUSES, FieldwatchError
 
 from . import _approvals, _aws, store
 from ._http import ApiError, log
@@ -28,22 +27,20 @@ YES, NO = {"YES", "Y"}, {"NO", "N"}
 KEYWORDS = {"MORE": "more", "PHOTO": "photo", "CALL": "call", "HELP": "help",
             "STOP": "stop", "UNSUBSCRIBE": "stop", "QUIT": "stop", "CANCEL": "stop",
             "START": "start", "UNSTOP": "start"}
-OPEN_STATUSES = {"open", "running", "investigating", "waiting", "waiting_for_farmer", "started"}
-
-
-def _inbound_module():
-    try:
-        return importlib.import_module("fieldwatch.notify.inbound")
-    except ModuleNotFoundError as e:
-        if e.name in ("fieldwatch.notify.inbound", "fieldwatch.notify"):
-            return None
-        raise
+OPEN_STATUSES = OPEN_INVESTIGATION_STATUSES  # kept for importers
 
 
 def handle(from_phone: str, body: str, channel: str) -> dict:
-    mod = _inbound_module()
-    if mod is not None and hasattr(mod, "handle"):
-        return mod.handle(from_phone, body, channel) or {}
+    service = interfaces.notify(lambda_client=_aws.client("lambda"))
+    if service is not None and channel == "mirror":
+        message = C.InboundMessage(provider_message_id=interfaces.mirror_message_id(), from_phone=store.e164(from_phone),
+                                   body=body, received_at=_aws.now_iso())
+        try:
+            return service.reply(message) or {}
+        except FieldwatchError as e:
+            if e.code != "NOT_IMPLEMENTED":  # no mirror Lambda configured: fall back below
+                raise ApiError(e.code if e.code in ("INVALID_INPUT", "NOT_FOUND") else "INTERNAL", e.message,
+                               retryable=e.retryable) from None
     return fallback(from_phone, body, channel)
 
 

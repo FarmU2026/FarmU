@@ -3,8 +3,9 @@
     POST /v1/auth/dashboard                 {passcode} -> {token, expires_at}  (passcode: SSM /fieldwatch/dashboard-passcode)
     GET  /v1/farms/{farm_id}/overview       -> {fields: [{field_id, name, geometry, status, latest_score}], open_investigations}
     GET  /v1/investigations/{investigation_id}  -> the fw-investigations item
-    POST /v1/replay                         {scene_id, field_ids?, farm_id?} -> 202 {replay_id}   (1 call / 30 s)
-    POST /v1/replay/reset                   {farm_id?} -> 202
+    POST /v1/replay                         {scene_id | field_ids+as_of, farm_id?} -> 202 {replay_id}   (1 call / 30 s)
+                                            invokes the scenes replay Lambda (contracts.ReplayRequest)
+    POST /v1/replay/reset                   {farm_id?} -> 202 (scenes reset Lambda, contracts.ResetRequest)
     POST /v1/mirror/reply                   {person_id, text, farm_id?} -> 202 (runs the reply hand-off as an SMS)
 
 Handler: cloud.api.dashboard.handler.
@@ -18,7 +19,9 @@ from datetime import datetime, timezone
 from boto3.dynamodb.conditions import Key
 from pydantic import BaseModel, Field
 
+from fieldwatch import contracts as C
 from fieldwatch import links
+from fieldwatch.interfaces import OPEN_INVESTIGATION_STATUSES, Env
 
 from . import _auth, _aws, _jobs, _reply, store
 from ._http import ApiError, Request, Response, Router
@@ -73,7 +76,7 @@ def overview(req: Request):
             "latest_scene_date": row.get("date") if row else None,
         })
         for inv in _recent_investigations(f["field_id"]):
-            if str(inv.get("status", "open")) in _reply.OPEN_STATUSES:
+            if str(inv.get("status", "open")) in OPEN_INVESTIGATION_STATUSES:
                 open_invs.append({k: inv.get(k) for k in ("investigation_id", "field_id", "status", "created_at",
                                                           "anomaly_id") if inv.get(k) is not None})
     return {"farm_id": farm_id, "fields": fields, "open_investigations": open_invs}
@@ -89,8 +92,9 @@ def investigation(req: Request):
 
 
 class ReplayIn(BaseModel):
-    scene_id: str = Field(min_length=3, max_length=200)
+    scene_id: str | None = Field(default=None, min_length=3, max_length=200)
     field_ids: list[str] | None = None
+    as_of: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
     farm_id: str | None = None
 
 
@@ -110,14 +114,14 @@ def _rate_limit(name: str, gap_s: int) -> None:
 def replay(req: Request):
     _auth.dashboard(req)
     body: ReplayIn = req.model(ReplayIn)
-    if not (os.getenv("FIELDWATCH_REPLAY_FN") or os.getenv("FIELDWATCH_SCENE_QUEUE_URL")):
-        raise ApiError("NOT_IMPLEMENTED", "Replay is not wired up yet (no replay function or scene queue)", 501)
+    if not body.scene_id and not (body.field_ids and body.as_of):
+        raise ApiError("INVALID_INPUT", "Send scene_id, or field_ids with as_of")
+    if not _jobs.configured(Env.REPLAY_FN):
+        raise ApiError("NOT_IMPLEMENTED", "Replay is not wired up yet (no replay function)", 501)
     _rate_limit("replay", REPLAY_GAP_S)
     replay_id = store.new_id("rpl_")
-    envelope = {"schema_version": "1", "type": "replay", "replay_id": replay_id, "scene_id": body.scene_id,
-                "field_ids": body.field_ids, "farm_id": body.farm_id, "requested_at": _aws.now_iso()}
-    if _jobs.invoke("FIELDWATCH_REPLAY_FN", envelope) is None:
-        _jobs.send_scene_message(envelope)
+    _jobs.replay(C.ReplayRequest(replay_id=replay_id, scene_id=body.scene_id, field_ids=body.field_ids,
+                                 as_of=body.as_of, farm_id=body.farm_id, requested_at=_aws.now_iso()))
     return Response(status=202, body={"replay_id": replay_id})
 
 
@@ -129,12 +133,9 @@ class ResetIn(BaseModel):
 def replay_reset(req: Request):
     _auth.dashboard(req)
     body: ResetIn = req.model(ResetIn)
-    envelope = {"schema_version": "1", "type": "reset", "farm_id": body.farm_id, "requested_at": _aws.now_iso()}
-    result = _jobs.invoke("FIELDWATCH_RESET_FN", envelope, wait=True)
+    result = _jobs.reset(C.ResetRequest(farm_id=body.farm_id, requested_at=_aws.now_iso()))
     if result is None:
-        if _jobs.send_scene_message(envelope) is None:
-            raise ApiError("NOT_IMPLEMENTED", "Reset is not wired up yet (no reset function or scene queue)", 501)
-        result = {"queued": True}
+        raise ApiError("NOT_IMPLEMENTED", "Reset is not wired up yet (no reset function)", 501)
     return Response(status=202, body={"status": "reset", "result": result})
 
 

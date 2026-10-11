@@ -665,15 +665,16 @@ def use_notify(impl: NotifyAPI | None) -> None:
     _notify_override = impl
 
 
-def notify() -> NotifyAPI | None:
+def notify(*, lambda_client: Any = None) -> NotifyAPI | None:
     """The notify lane as configured: an injected implementation, else LambdaNotify when FIELDWATCH_SEND_FN is
-    set, else None (local runs: callers fall back to the legacy `fieldwatch.sms` or the phone mirror)."""
+    set (using `lambda_client` if given), else None (local runs: callers fall back to the legacy `fieldwatch.sms`
+    or the phone mirror)."""
     if _notify_override is not None:
         return _notify_override
     send_fn = os.getenv(Env.SEND_FN, "").strip()
     if not send_fn:
         return None
-    return LambdaNotify(send_fn, os.getenv(Env.MIRROR_FN, "").strip() or None)
+    return LambdaNotify(send_fn, os.getenv(Env.MIRROR_FN, "").strip() or None, client=lambda_client)
 
 
 def mirror_message_id() -> str:

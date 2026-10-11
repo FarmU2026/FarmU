@@ -37,6 +37,8 @@ class Notifications(Stack):
         send_arn = self.format_arn(service='lambda', resource='function', resource_name='fw-notify-send')
         environment = {
             'FIELDWATCH_TABLE_PREFIX': 'fw-', 'FIELDWATCH_EVENT_BUS': data.bus.event_bus_name,
+            # Approval replies call fieldwatch.approvals (via interfaces): it must use fw-approvals, not a local file.
+            'FIELDWATCH_APPROVALS_BACKEND': 'dynamo',
             'FIELDWATCH_LINK_KEY_PARAM': '/fieldwatch/link-signing-key',
             'FIELDWATCH_TWILIO_TOKEN_PARAM': '/fieldwatch/twilio-auth-token',
             'FIELDWATCH_PUBLIC_URL': public_url.value_as_string,

@@ -47,7 +47,20 @@ def _specialist(name: str, job: str, tools: list, timeline: ToolTimeline) -> Age
     )
 
 
-def build_specialists(timeline: ToolTimeline) -> list:
+# --- interfaces repair (B3): optional `tools=` so investigation.py can pass toolset.tools_for(...) ---
+# `tools` replaces the READ tools by name (e.g. the same registry tools served through the Gateway). Any name it
+# lacks falls back to today's local tool, and the supervisor's write tools (which pause for a YES with a Strands
+# interrupt) always stay local. tools=None (the default) is exactly the previous behavior.
+
+
+def _pick(tools: list | None, *local: object) -> list:
+    if tools is None:
+        return list(local)
+    by_name = {getattr(t, "tool_name", None): t for t in tools}
+    return [by_name.get(getattr(t, "tool_name", None), t) for t in local]
+
+
+def build_specialists(timeline: ToolTimeline, tools: list | None = None) -> list:
     """Each specialist becomes a tool the supervisor can call."""
     imagery = _specialist(
         "imagery",
@@ -56,19 +69,19 @@ def build_specialists(timeline: ToolTimeline) -> list:
         "where the weak area is and its shape. Rings and arcs mean irrigation, straight edges mean weather or "
         "a sprayer pass, irregular blotches mean soil, pests or disease. Use get_scene_analysis for the "
         "pre-computed pattern if the live image is unavailable or ambiguous. Note the scene date.",
-        [T.list_fields, T.look_at_field, T.get_scene_analysis],
+        _pick(tools, T.list_fields, T.look_at_field, T.get_scene_analysis),
         timeline,
     )
     weather = _specialist(
         "weather",
         "You check whether weather explains the stress: drought, hail, heat. Compare rain to normal.",
-        [T.list_fields, T.get_weather],
+        _pick(tools, T.list_fields, T.get_weather),
         timeline,
     )
     soil = _specialist(
         "soil",
         "You check whether soil explains the stress: sandy pockets, drainage, variability inside the field.",
-        [T.list_fields, T.get_soil],
+        _pick(tools, T.list_fields, T.get_soil),
         timeline,
     )
 
@@ -109,11 +122,11 @@ For the field you are asked about (call list_fields once to get its id, then use
 """
 
 
-def build_supervisor(timeline: ToolTimeline, session_manager=None) -> Agent:
+def build_supervisor(timeline: ToolTimeline, session_manager=None, tools: list | None = None) -> Agent:
     return Agent(
         name="supervisor",
         model=model(),
-        tools=build_specialists(timeline) + [T.list_fields, T.estimate_loss] + T.WRITE_TOOLS,
+        tools=build_specialists(timeline, tools) + _pick(tools, T.list_fields, T.estimate_loss) + T.WRITE_TOOLS,
         hooks=[timeline],
         callback_handler=None,
         session_manager=session_manager,

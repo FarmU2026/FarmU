@@ -263,17 +263,25 @@ def test_overview_and_investigation(seeded):
 def test_replay_and_reset(seeded, monkeypatch):
     h = _login(seeded)
     assert call(dashboard, "POST", "/v1/replay", {"scene_id": "S2B_14TPM_20260718_0_L2A"}, headers=h)[0] == 501
-    monkeypatch.setenv("FIELDWATCH_SCENE_QUEUE_URL", seeded.queue_url)
+    assert call(dashboard, "POST", "/v1/replay/reset", {"farm_id": FARM}, headers=h)[0] == 501
+    monkeypatch.setenv("FIELDWATCH_REPLAY_FN", "fw-scene-replay")
+    monkeypatch.setenv("FIELDWATCH_RESET_FN", "fw-scene-reset")
+    seeded.lambda_responses["fw-scene-reset"] = {"farm_id": FARM, "deleted": {"fw-scene-analyses": 1}}
+    assert call(dashboard, "POST", "/v1/replay", {"field_ids": [FIELD]}, headers=h)[0] == 400  # as_of missing
     got, body, _ = call(dashboard, "POST", "/v1/replay", {"scene_id": "S2B_14TPM_20260718_0_L2A", "field_ids": [FIELD]},
                         headers=h)
     assert got == 202 and body["replay_id"].startswith("rpl_")
+    body_id = body["replay_id"]
     got, body, _ = call(dashboard, "POST", "/v1/replay", {"scene_id": "S2B_14TPM_20260718_0_L2A"}, headers=h)
     assert got == 429 and body["error"]["retryable"] is True
-    got, _, _ = call(dashboard, "POST", "/v1/replay/reset", {"farm_id": FARM}, headers=h)
-    assert got == 202
-    msgs = seeded.queue_messages()
-    assert [m["type"] for m in msgs] == ["replay", "reset"]
-    assert msgs[0]["scene_id"] == "S2B_14TPM_20260718_0_L2A" and msgs[0]["field_ids"] == [FIELD]
+    got, out, _ = call(dashboard, "POST", "/v1/replay/reset", {"farm_id": FARM}, headers=h)
+    assert got == 202 and out["result"]["deleted"] == {"fw-scene-analyses": 1}
+    (rfn, rkind, rp), (sfn, skind, sp) = seeded.lambda_calls
+    replay = C.ReplayRequest.model_validate(rp)
+    assert (rfn, rkind) == ("fw-scene-replay", "Event") and replay.replay_id == body_id
+    assert replay.scene_id == "S2B_14TPM_20260718_0_L2A" and replay.field_ids == [FIELD]
+    assert (sfn, skind) == ("fw-scene-reset", "RequestResponse") and C.ResetRequest.model_validate(sp).farm_id == FARM
+    assert seeded.queue_messages() == []  # replay envelopes are the scenes lane's to build
 
 
 def test_mirror_reply(seeded):

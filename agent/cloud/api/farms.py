@@ -2,7 +2,7 @@
 
     POST /api/farms                                   create farm + people + fields; start context build; scene check
     GET  /api/farms/{farm_id}                         farm + fields (+ stats) + thread (THREAD# items)
-    POST /api/farms/{farm_id}/check                   scene check message on fw-scene-queue
+    POST /api/farms/{farm_id}/check                   invoke the scenes check-latest Lambda for the farm's fields
     POST /api/farms/{farm_id}/fields/{field_id}/ask   StartInvestigation on the bus
     POST /api/farms/{farm_id}/reply                   phone panel reply (mirror reply)
     GET  /api/farms/{farm_id}/fields/{field_id}/{image}   {kind}.png -> 302 presigned S3 URL
@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from fieldwatch import config
 from fieldwatch import contracts as C
+from fieldwatch.interfaces import Env
 
 from . import _aws, _jobs, _reply, store
 from ._http import ApiError, Request, Router, log, redirect
@@ -133,7 +134,11 @@ def check_now(req: Request):
     farm_id = req.params["farm_id"]
     store.get_farm_item(farm_id)
     fields = store.list_fields(farm_id)
-    queued = _jobs.scene_check(farm_id, fields, reason="check_now") is not None
+    try:
+        queued = _jobs.scene_check(farm_id, fields, reason="check_now") is not None
+    except Exception:  # noqa: BLE001 - the button should not 500 because the scenes lane is down
+        log.exception("check-latest invoke failed for %s", farm_id)
+        queued = False
     _aws.table("farms").update_item(Key={"farm_id": farm_id, "item": "FARM"},
                                     UpdateExpression="SET last_checked = :t", ExpressionAttributeValues={":t": _aws.now_iso()})
     return {**store.farm_view(farm_id), "check_queued": queued}
@@ -195,6 +200,8 @@ def status(req: Request):  # noqa: ARG001
         "sms_from": os.getenv("FIELDWATCH_SMS_FROM") or None,
         "model": config.MODEL_ID,
         "backend": "cloud",
-        "scene_queue": bool(os.getenv("FIELDWATCH_SCENE_QUEUE_URL")),
-        "context_workflow": bool(os.getenv("FIELDWATCH_CONTEXT_SM_ARN")),
+        "check_latest": bool(os.getenv(Env.CHECK_FN)),
+        "replay": bool(os.getenv(Env.REPLAY_FN)),
+        "notify": bool(os.getenv(Env.SEND_FN)),
+        "context_workflow": bool(os.getenv(Env.CONTEXT_SM_ARN)),
     }

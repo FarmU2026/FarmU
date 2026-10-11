@@ -206,3 +206,36 @@ def test_scene_queue_message_shapes():
     assert env.replay and env.replay_id == "rpl_0001" and env.as_of == "2026-07-18"
     with pytest.raises(ValueError):
         C.SceneQueueMessage.parse({"type": "check", "farm_id": "x"})  # the API's old envelope is not accepted
+
+
+# ---------- notify -> approvals (cloud/lambdas/notify/runtime.py adapter) ----------
+
+
+def test_notify_decision_adapter_maps_names_and_does_not_double_emit(tmp_path, monkeypatch):
+    from cloud.lambdas.notify import runtime
+    from fieldwatch import approvals
+
+    approvals.use_store(approvals.LocalStore(tmp_path))
+    emitted = []
+    approvals.set_event_sink(lambda kind, detail: emitted.append(kind))
+    monkeypatch.setattr(runtime, "_person_phone", lambda approval_id, person_id: "+14025550100")
+    a = approvals.create_pending("inv-1", "work_order", "Send a repair ticket", "dad", sent_to_phone="402 555 0100",
+                                 farm_id="farm_x")
+    # exactly the call Notifications.reply makes (tests/test_notify.py pins it)
+    out = runtime.record_decision(approval_id=a.approval_id, person_id="dad", decision="approved", channel="sms")
+    assert out.status == "approved" and out.decided_by == "dad" and emitted == []
+    again = runtime.record_decision(approval_id=a.approval_id, person_id="dad", decision="declined", channel="sms")
+    assert again.status == "approved"  # already decided: the stored record, no exception
+
+
+# ---------- agents.py tools= (investigation passes toolset.tools_for(...)) ----------
+
+
+def test_supervisor_takes_tools_by_name_and_keeps_local_write_tools():
+    from fieldwatch import agents, toolset
+    from fieldwatch import tools as T
+
+    remote = toolset.local_tools(names=["get_weather"])  # stands in for the Gateway's copy
+    picked = agents._pick(remote, T.list_fields, T.get_weather)
+    assert picked[0] is T.list_fields and picked[1] is remote[0]
+    assert agents._pick(None, T.list_fields) == [T.list_fields]

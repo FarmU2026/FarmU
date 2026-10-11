@@ -681,6 +681,13 @@ class TestCheckLatest:
         assert {m["id"] for m in messages} == {"scene-MGRS-14TPM", "scene-MGRS-14TNM"}
         assert all(m["type"] == "Feature" and "replay" not in m for m in messages)  # plain items, not replay envelopes
 
+    def test_check_now_request_limits_to_the_fields_tiles(self, aws, monkeypatch):
+        register_field(tile="14TPM")
+        register_field("f2", tile="MGRS-14TNM")
+        monkeypatch.setattr(check_latest, "stac_search", lambda body: [])
+        out = check_latest.handler({"schema_version": "1", "farm_id": "x", "field_ids": ["f2"], "reason": "check_now"})
+        assert out["tiles"] == ["MGRS-14TNM"]
+
     def test_no_tiles_no_calls(self, aws, monkeypatch):
         monkeypatch.setattr(check_latest, "stac_search", lambda b: pytest.fail("should not search"))
         assert check_latest.handler({}) == {"tiles": [], "scenes_queued": 0}

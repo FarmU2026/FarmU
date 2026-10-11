@@ -1,7 +1,6 @@
 """Web API (WS12): today's UI routes (/api/...), reply hand-off and the Twilio webhook, against moto."""
 import json
-import sys
-import types
+from fieldwatch import contracts as C
 
 import pytest
 
@@ -49,7 +48,7 @@ def test_create_farm_starts_context_build_and_scene_check(aws, monkeypatch):
         {"StartAt": "x", "States": {"x": {"Type": "Pass", "End": True}}}),
         roleArn="arn:aws:iam::123456789012:role/fw-sfn")["stateMachineArn"]
     monkeypatch.setenv("FIELDWATCH_CONTEXT_SM_ARN", sm)
-    monkeypatch.setenv("FIELDWATCH_SCENE_QUEUE_URL", aws.queue_url)
+    monkeypatch.setenv("FIELDWATCH_CHECK_FN", "fw-scene-check-latest")
     code, _, _ = signup(farms)
     assert code == 200
     execs = aws.sfn.list_executions(stateMachineArn=sm)["executions"]
@@ -58,8 +57,10 @@ def test_create_farm_starts_context_build_and_scene_check(aws, monkeypatch):
     assert inp == {"schema_version": "1", "farm_id": FARM, "field_ids": [FIELD]}
     farm_item = aws.table("farms").get_item(Key={"farm_id": FARM, "item": "FARM"})["Item"]
     assert farm_item["context_build_id"] == execs[0]["name"]
-    msgs = aws.queue_messages()
-    assert msgs[0]["type"] == "check" and msgs[0]["field_ids"] == [FIELD] and msgs[0]["reason"] == "signup"
+    (fn, kind, payload), = [c for c in aws.lambda_calls if c[0] == "fw-scene-check-latest"]
+    req = C.CheckLatestRequest.model_validate(payload)
+    assert kind == "Event" and req.field_ids == [FIELD] and req.reason == "signup" and req.farm_id == FARM
+    assert aws.queue_messages() == []  # the API never writes to fw-scene-queue
 
 
 def test_resignup_replaces_fields(aws):
@@ -115,13 +116,14 @@ def test_get_missing_farm(aws):
 # ---------- check, ask, images, status ----------
 
 
-def test_check_now_sends_to_queue(aws, monkeypatch):
+def test_check_now_invokes_check_latest(aws, monkeypatch):
     signup(farms)
-    monkeypatch.setenv("FIELDWATCH_SCENE_QUEUE_URL", aws.queue_url)
+    monkeypatch.setenv("FIELDWATCH_CHECK_FN", "fw-scene-check-latest")
     code, farm, _ = call(farms, "POST", f"/api/farms/{FARM}/check")
     assert code == 200 and farm["check_queued"] is True and farm["last_checked"]
-    (msg,) = aws.queue_messages()
-    assert msg["type"] == "check" and msg["farm_id"] == FARM and msg["fields"][0]["polygon"][0] == [-96.548, 42.168]
+    (_, kind, payload), = aws.lambda_calls
+    assert kind == "Event" and C.CheckLatestRequest.model_validate(payload).reason == "check_now"
+    assert payload["farm_id"] == FARM and payload["field_ids"] == [FIELD]
 
 
 def test_check_without_queue_is_harmless(aws):
@@ -244,15 +246,29 @@ def test_reply_yes_falls_back_to_reply_received_when_approvals_cannot_be_importe
     assert aws.table("approvals").get_item(Key={"approval_id": "apr_1"})["Item"]["status"] == "pending"
 
 
-def test_reply_prefers_notify_inbound_module(aws, monkeypatch):
-    calls = []
-    pkg = types.ModuleType("fieldwatch.notify.inbound")
-    pkg.handle = lambda frm, body, channel: calls.append((frm, body, channel)) or {"status": "ok"}
-    monkeypatch.setitem(sys.modules, "fieldwatch.notify.inbound", pkg)
+def test_reply_prefers_the_notify_lane(aws, monkeypatch):
+    """With WS9 deployed, a phone-panel reply goes to its mirror Lambda as an InboundMessage."""
+    monkeypatch.setenv("FIELDWATCH_SEND_FN", "fw-notify-send")
+    monkeypatch.setenv("FIELDWATCH_MIRROR_FN", "fw-notify-mirror")
     signup(farms)
+    aws.lambda_calls.clear()
+    aws.lambda_responses["fw-notify-mirror"] = {"status": "received", "message_id": "msg-in-1", "response_text": ""}
     _, farm, _ = call(farms, "POST", f"/api/farms/{FARM}/reply", {"text": "YES"})
-    assert calls == [("+14025550100", "YES", "mirror")] and farm["reply"] == {"status": "ok"}
-    assert aws.events == []
+    (fn, kind, payload), = aws.lambda_calls
+    msg = C.InboundMessage.model_validate(payload)
+    assert fn == "fw-notify-mirror" and kind == "RequestResponse"
+    assert msg.from_phone == "+14025550100" and msg.body == "YES" and msg.provider_message_id.startswith("mirror:")
+    assert farm["reply"]["status"] == "received" and aws.events == []
+
+
+def test_sms_inbound_forwards_to_the_notify_reply_lambda(aws, monkeypatch):
+    monkeypatch.setenv("FIELDWATCH_NOTIFY_REPLY_FN", "fw-notify-reply")
+    aws.lambda_responses["fw-notify-reply"] = {"statusCode": 200, "headers": {"content-type": "application/xml"},
+                                               "body": "<Response></Response>"}
+    code, body, headers = _twilio(FORM)
+    (fn, _, payload), = aws.lambda_calls
+    assert fn == "fw-notify-reply" and payload["rawPath"] == "/sms/inbound" and code == 200
+    assert body == "<Response></Response>" and aws.events == []
 
 
 def test_reply_attaches_open_investigation(aws):

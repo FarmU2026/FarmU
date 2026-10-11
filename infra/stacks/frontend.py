@@ -1,16 +1,19 @@
 """FieldWatch-Frontend (workstream 14, T29/T30/T33): the static site in web/ on S3 + CloudFront.
 
 A private bucket behind CloudFront with origin access control (no public bucket, no website hosting).
-BucketDeployment uploads web/ and generates config.js from CDK context, so one stack deploys with no
-code change once the other stacks exist:
+BucketDeployment uploads web/ and generates config.js. Its values come from the stack objects app.py passes
+in, as cross-stack references resolved at deploy time, so a plain `cdk deploy --all` writes a working config:
 
-    cdk deploy FieldWatch-Frontend \
-        -c apiUrl=https://<id>.execute-api.us-west-2.amazonaws.com \
-        -c appsyncHttp=<id>.appsync-api.us-west-2.amazonaws.com \
-        -c appsyncRealtime=<id>.appsync-realtime-api.us-west-2.amazonaws.com \
-        -c appsyncApiKey=da2-...
+    Frontend(app, "FieldWatch-Frontend", api=api, feed=feed)
+        apiUrl          <- api.http_api.api_endpoint
+        appsyncHttp     <- feed.api.http_dns
+        appsyncRealtime <- feed.api.realtime_dns
+        appsyncApiKey   <- the Feed stack's subscribe-only API key
 
-All four default to empty: the pages then call the same origin and poll instead of subscribing.
+`-c apiUrl=... -c appsyncHttp=... -c appsyncRealtime=... -c appsyncApiKey=...` still override their source.
+With neither a stack nor context a value is empty: the pages then call the same origin and poll.
+The Api stack's CORS stays `*` (no cookies; the dashboard sends a bearer token): naming the CloudFront domain
+there would make Api depend on Frontend, which already depends on Api.
 web/config.js in the repo is the local-dev config and is NOT deployed; the generated one replaces it.
 """
 import json
@@ -34,12 +37,20 @@ def _strip(v: str) -> str:
 
 
 class Frontend(Stack):
-    def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
+    def __init__(self, scope: Construct, construct_id: str, *, api=None, feed=None, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
         Tags.of(self).add("project", "fieldwatch")
 
-        cfg = {k: str(self.node.try_get_context(k) or "") for k in CONTEXT_KEYS}
-        cfg["apiUrl"] = _strip(cfg["apiUrl"])
+        from_stacks = {
+            "apiUrl": api.http_api.api_endpoint if api is not None else "",  # no trailing slash
+            "appsyncHttp": feed.api.http_dns if feed is not None else "",
+            "appsyncRealtime": feed.api.realtime_dns if feed is not None else "",
+            "appsyncApiKey": feed.api_key if feed is not None else "",
+        }
+        cfg = {}
+        for k in CONTEXT_KEYS:
+            override = self.node.try_get_context(k)
+            cfg[k] = _strip(str(override)) if override else from_stacks[k]
 
         self.bucket = s3.Bucket(
             self, "SiteBucket",
