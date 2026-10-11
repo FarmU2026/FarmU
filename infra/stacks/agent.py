@@ -21,6 +21,7 @@ from stacks.common import python_lambda
 
 RUNTIME_ARN_PARAM = "/fieldwatch/runtime-arn"
 SESSIONS_BUCKET_PARAM = "/fieldwatch/sessions-bucket"
+BUCKET_PARAM = "/fieldwatch/bucket"  # agent/app.py _SSM_ENV reads these at Runtime startup
 
 # (rule id, detail types, sources or None)
 RULES = [
@@ -82,6 +83,10 @@ class Agent(Stack):
             self, "SessionsBucketParam", parameter_name=SESSIONS_BUCKET_PARAM,
             string_value=data.bucket.bucket_name,
             description="S3 bucket for Strands sessions (prefix sessions/); read by the Runtime agent",
+        )
+        ssm.StringParameter(
+            self, "BucketParam", parameter_name=BUCKET_PARAM, string_value=data.bucket.bucket_name,
+            description="FieldWatch data bucket (overlays, context); read by the Runtime agent at startup",
         )
 
         CfnOutput(self, "StarterDlqUrl", value=self.dlq.queue_url)
