@@ -21,6 +21,7 @@ from stacks.common import python_lambda
 
 RUNTIME_ARN_PARAM = "/fieldwatch/runtime-arn"
 SESSIONS_BUCKET_PARAM = "/fieldwatch/sessions-bucket"
+BUCKET_PARAM = "/fieldwatch/bucket"  # agent/app.py _SSM_ENV reads these at Runtime startup
 
 # (rule id, detail types, sources or None)
 RULES = [
@@ -52,12 +53,14 @@ class Agent(Stack):
             environment={
                 "FIELDWATCH_RUNTIME_ARN_PARAM": RUNTIME_ARN_PARAM,
                 "FIELDWATCH_INVESTIGATIONS_TABLE": "fw-investigations",  # fixed name (data_plane.py)
+                "FIELDWATCH_FIELDS_TABLE": "fw-fields",  # question runs pick the farm's field from it
             },
             retry_attempts=2,
             max_event_age=Duration.hours(6),
             dead_letter_queue=self.dlq,
         )
         data.tables["fw-investigations"].grant_read_write_data(self.starter)
+        data.tables["fw-fields"].grant_read_data(self.starter)
         self.starter.add_to_role_policy(iam.PolicyStatement(
             actions=["bedrock-agentcore:InvokeAgentRuntime"],
             resources=[f"arn:aws:bedrock-agentcore:{self.region}:{self.account}:runtime/*"],
@@ -82,6 +85,10 @@ class Agent(Stack):
             self, "SessionsBucketParam", parameter_name=SESSIONS_BUCKET_PARAM,
             string_value=data.bucket.bucket_name,
             description="S3 bucket for Strands sessions (prefix sessions/); read by the Runtime agent",
+        )
+        ssm.StringParameter(
+            self, "BucketParam", parameter_name=BUCKET_PARAM, string_value=data.bucket.bucket_name,
+            description="FieldWatch data bucket (overlays, context); read by the Runtime agent at startup",
         )
 
         CfnOutput(self, "StarterDlqUrl", value=self.dlq.queue_url)

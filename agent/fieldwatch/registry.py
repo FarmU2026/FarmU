@@ -151,7 +151,7 @@ TOOLS: list[ToolSpec] = [
              DroughtIn, H.get_drought, output_model=C.DroughtStatus, workstream=3),
     ToolSpec("get_soil_profile", "Soil map units for a field from NRCS Soil Data Access.", "read",
              FieldIdIn, CT.get_soil_profile, output_model=C.SoilProfile, workstream=4),
-    ToolSpec("get_field_context", "Everything static about a field: soil, terrain, crop history, neighbors, economics.",
+    ToolSpec("get_field_context", "Everything static about a field: soil, terrain, mapped water (flood zones, streams, wetlands), crop history, neighbors, economics.",
              "read", FieldIdIn, CT.get_field_context, output_model=C.FieldContext, workstream=4),
     ToolSpec("get_disease_reports", "County disease confirmations for the season (EDDMapS).", "read",
              DiseaseIn, CT.get_disease_reports, output_model=C.DiseaseReport, workstream=4),

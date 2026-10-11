@@ -21,6 +21,11 @@ def get_terrain_summary(field_id):
     item=common.field(field_id)
     return terrain.get_terrain(item["field_id"],common.polygon(item))
 
+def get_water_context(field_id):
+    from . import water
+    item=common.field(field_id)
+    return water.get_water_context(item["field_id"],common.polygon(item))
+
 def get_crop_context(field_id,as_of=None):
     from . import boundaries
     item=common.field(field_id)
@@ -61,8 +66,10 @@ def get_field_context(field_id):
     crop=get_crop_context(item["field_id"])
     economy=get_economics(item["field_id"])
     sources=["NRCS Soil Data Access","USGS 3DEP 1 m","USDA CSB 2018-2025"]+economy.pop("sources")
+    try: water=get_water_context(item["field_id"])
+    except Exception: water=None  # mapped water is extra evidence; the rest of the context stands without it
     return FieldContext(field_id=item["field_id"],built_at=common.now(),soil=get_soil_profile(item["field_id"]),
-        terrain=get_terrain_summary(item["field_id"]),sources=sources,**crop,**economy)
+        terrain=get_terrain_summary(item["field_id"]),water=water,sources=sources,**crop,**economy)
 
 
 def cached_cohort_field_ids(field_id):

@@ -14,6 +14,10 @@ TerrainSummary, DiseaseReport and FieldContext contracts. No Strands or web impo
   persistent per-farm cache in S3 or a local cache. Crop history uses the greatest
   overlapping CSB polygon. Cohorts within 10 km use the latest available source
   year (2025 for current seasons); they are a historical same-crop proxy.
+- Water (`water.py`): FEMA NFHL flood hazard zones (layer 28), USGS NHD flowlines (layer 6, small-scale layer 4 as
+  fallback) and USFWS NWI wetlands, each queried by envelope as GeoJSON. Percentages and stream distance are
+  computed in a spherical Lambert equal-area projection centred on the field (no pyproj). Each source is optional
+  (None / `(unavailable)` in `sources`); only all three failing raises.
 - Economics: NASS_API_KEY enables NASS annual county yield / national price.
   Excludes annual observations from the as-of year and records loaded afterward.
   Without a key or usable rows, corn/soybean/wheat/milo use explicit planning

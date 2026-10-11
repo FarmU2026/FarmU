@@ -102,6 +102,17 @@ def make_investigations_table():
     )
 
 
+def make_fields_table():
+    """fw-fields as the data plane defines it (pk farm_id, sk field_id)."""
+    return boto3.resource("dynamodb", region_name=REGION).create_table(
+        TableName="fw-fields",
+        KeySchema=[{"AttributeName": "farm_id", "KeyType": "HASH"}, {"AttributeName": "field_id", "KeyType": "RANGE"}],
+        AttributeDefinitions=[{"AttributeName": "farm_id", "AttributeType": "S"},
+                              {"AttributeName": "field_id", "AttributeType": "S"}],
+        BillingMode="PAY_PER_REQUEST",
+    )
+
+
 def make_bus_with_queue():
     """The `fieldwatch` bus plus an SQS queue catching everything on it. Returns (events client, sqs client, queue url)."""
     events = boto3.client("events", region_name=REGION)
