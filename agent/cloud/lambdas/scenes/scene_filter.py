@@ -6,7 +6,8 @@ Trigger: SQS `fw-scene-queue` (batch 10, partial batch failures). A message body
 
 Rules, in order: skip collections other than sentinel-2-l2a / sentinel-2-c1-l2a; look the fields up in fw-tile-index by the
 item's grid:code; skip when no field matches or (live scenes only) the scene is more than 80% cloudy; claim
-`scene#<scene_id>` in fw-idempotency with a conditional put (replays claim `scene#<scene_id>#replay#<replay_id>`);
+`scene#<scene_id>#field#<field_id>` per field in fw-idempotency with conditional puts, keeping only fields not done
+yet, so a field added later still gets the scene (replays claim `scene#<scene_id>#replay#<replay_id>`);
 start one Step Functions Express execution per scene with the SceneAnalysisInput.
 """
 from __future__ import annotations
@@ -82,15 +83,27 @@ def process_message(body: str | dict) -> str:
     if not env["replay"] and scene["cloud_cover"] > cm.MAX_SCENE_CLOUD:
         return "skipped:cloud"  # an explicit replay is the operator's choice; the analyzer still reports too_cloudy per field
 
-    key = f"scene#{scene['scene_id']}"
     if env["replay"]:
-        key += f"#replay#{env['replay_id'] or 'noid'}"
-    if not cm.claim(key, scene_id=scene["scene_id"], replay=bool(env["replay"]), fields=len(fields)):
-        return "skipped:duplicate"
+        keys = [f"scene#{scene['scene_id']}#replay#{env['replay_id'] or 'noid'}"]
+        if not cm.claim(keys[0], scene_id=scene["scene_id"], replay=True, fields=len(fields)):
+            return "skipped:duplicate"
+    else:
+        # Live scenes are claimed per FIELD: a field added after its tile's scene was processed (sign-up, add field)
+        # still gets that scene analyzed, while fields already done are not redone.
+        keys, todo = [], []
+        for f in fields:
+            k = f"scene#{scene['scene_id']}#field#{f['field_id']}"
+            if cm.claim(k, scene_id=scene["scene_id"], replay=False, field_id=f["field_id"]):
+                keys.append(k)
+                todo.append(f)
+        if not todo:
+            return "skipped:duplicate"
+        fields = todo
     try:
         arn = start_execution(scene, fields, bool(env["replay"]), env["replay_id"], env["as_of"])
     except Exception:
-        cm.release(key)  # let the redelivery start it
+        for k in keys:
+            cm.release(k)  # let the redelivery start it
         raise
     log.info("started %s for %s (%d fields, replay=%s)", arn, scene["scene_id"], len(fields), env["replay"])
     return "started"
