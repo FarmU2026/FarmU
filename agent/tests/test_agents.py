@@ -66,7 +66,7 @@ DIAGNOSIS = {
     "ruled_out": ["drought", "hail"],
     "dollars_low": 1,
     "dollars_high": 2,
-    "how_sure": "not sure, need a photo",
+    "how_sure": "not sure yet",
     "recommended_action": "none",
     "action_detail": "Check the nozzles.",
 }
@@ -227,7 +227,7 @@ def test_supervisor_has_no_self_made_numbers(harness):
 
 
 def test_supervisor_says_not_sure_when_scorer_is_unsure(harness):
-    assert harness(FULL_RUN, top=0.4).structured_output.how_sure == "not sure, need a photo"
+    assert harness(FULL_RUN, top=0.4).structured_output.how_sure == "not sure yet"
 
 
 def test_supervisor_tools_never_include_specialist_only_or_unknown_writes():
@@ -284,7 +284,7 @@ def test_evidence_from_analysis_and_hail_watch():
 
 def test_how_sure_phrase_thresholds():
     assert [how_sure_phrase(p) for p in (0.95, 0.8, 0.6, 0.3)] == [
-        "pretty sure", "pretty sure", "fairly sure", "not sure, need a photo"]
+        "pretty sure", "pretty sure", "fairly sure", "not sure yet"]
 
 
 def test_scrub_percentages_keeps_only_allowed():

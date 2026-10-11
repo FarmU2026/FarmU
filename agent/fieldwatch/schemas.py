@@ -21,7 +21,7 @@ def how_sure_phrase(top_probability: float) -> str:
         return "pretty sure"
     if top_probability >= FAIRLY_SURE:
         return "fairly sure"
-    return "not sure, need a photo"
+    return "not sure yet"
 
 
 _PERCENT = re.compile(r"(?:\b(?:about|roughly|around|nearly|almost)\s+|~\s*)?(\d+(?:\.\d+)?)\s?(?:%|percent\b)", re.I)
@@ -45,7 +45,7 @@ class Diagnosis(BaseModel):
     ruled_out: list[str] = Field(default_factory=list)
     dollars_low: int = Field(description="Low end of the loss estimate if nothing is done")
     dollars_high: int = Field(description="High end of the loss estimate if nothing is done")
-    how_sure: str = Field(description="'pretty sure', 'fairly sure', or 'not sure, need a photo'")
+    how_sure: str = Field(description="'pretty sure', 'fairly sure', or 'not sure yet'")
     recommended_action: str = Field(
         description="One of: repair_work_order, scouting_pin, request_photo, insurance_notice, none"
     )

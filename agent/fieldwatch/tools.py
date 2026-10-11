@@ -8,6 +8,7 @@ write tool without an approval: it texts through the notify lane (interfaces.not
 """
 import hashlib
 import json
+import re
 from datetime import date, timedelta
 
 import requests
@@ -234,7 +235,8 @@ def create_work_order(field_id: str, assignee: str, what_to_check: str, tool_con
 def create_scout_pin(field_id: str, where: str, what_to_look_for: str, tool_context: ToolContext) -> str:
     """Drop a scouting pin with coordinates and what to look for. Requires farmer approval."""
     f = _field(field_id)
-    summary = f"Scouting pin on the {f['name']} ({where}): look for {what_to_look_for}"
+    look = re.sub(r"^\s*look for:?\s*", "", str(what_to_look_for), flags=re.I)  # the agent often repeats "Look for:"
+    summary = f"Scouting pin on the {f['name']} ({where}): look for {look}"
     a = _approve(tool_context, "scout_pin", summary)
     if a.status != "approved":
         return _not_approved(a, "scouting pin")
