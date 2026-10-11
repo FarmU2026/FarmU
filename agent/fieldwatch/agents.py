@@ -461,7 +461,7 @@ def score_payload(res: C.ScoreResult) -> dict:
         "hypotheses": [{"condition": h.condition, "percent": round(h.probability * 100), "status": h.status}
                        for h in ranked],
         "top_condition": top.condition if top else None,
-        "how_sure": how_sure_phrase(top.probability) if top else "not sure, need a photo",
+        "how_sure": how_sure_phrase(top.probability) if top else "not sure yet",
         "close_call": bool(len(ranked) > 1 and ranked[0].probability - ranked[1].probability < CLOSE_CALL),
         "catalog_version": res.catalog_version,
     }
@@ -650,7 +650,11 @@ For the field you are asked about (call list_fields once to get its id, then use
 
 Use send_farmer_message only to text someone on the farm directly (for example an urgent heads-up); the
 question for the farmer and your final diagnosis are sent for you. Farmer-facing text is plain ASCII: no em
-dashes, no emoji.
+dashes, no emoji, and no index values or other raw numbers except acres and dollars.
+
+Location: say where the problem is ONLY with the flagged region's `where` from the satellite analysis (e.g.
+"south-west part of the field"), in the diagnosis and in any scouting pin or work order. look_at_field's
+`weakest_area` is just the palest spot right now and is NOT the problem area.
 
 Condition, hypotheses, affected acres and dollars in the diagnosis are filled in for you from the score and
 impact results, so never write your own. Call estimate_impact for the likely condition (the acres come from the

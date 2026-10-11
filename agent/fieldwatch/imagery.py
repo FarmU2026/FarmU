@@ -144,6 +144,8 @@ def render_field(bbox: BBox, scene: Scene, poly: Polygon | None = None) -> Field
         "health_index_high_90pct": round(float(np.percentile(field, 90)), 2),
         "share_of_field_below_0_3": round(float((field < 0.3).mean()), 2),
         "weakest_area": weakest,
+        "weakest_area_note": "lowest greenness right now, which can be normal for that spot (a waterway, an edge); "
+                             "the PROBLEM area is the analysis region's `where`",
         "grid_medians": {k: round(v, 2) for k, v in cells.items()},
     }
     return FieldView(scene=scene, truecolor_png=_png(rgb), health_png=_png(heat), stats=stats)
