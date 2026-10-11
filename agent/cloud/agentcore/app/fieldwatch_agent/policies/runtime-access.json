@@ -113,6 +113,19 @@
       ]
     },
     {
+      "Sid": "LongTermMemory",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock-agentcore:CreateEvent",
+        "bedrock-agentcore:RetrieveMemoryRecords",
+        "bedrock-agentcore:ListMemoryRecords",
+        "bedrock-agentcore:GetMemoryRecord",
+        "bedrock-agentcore:ListEvents",
+        "bedrock-agentcore:GetEvent"
+      ],
+      "Resource": "arn:aws:bedrock-agentcore:us-west-2:*:memory/*"
+    },
+    {
       "Sid": "SendMessages",
       "Effect": "Allow",
       "Action": [
