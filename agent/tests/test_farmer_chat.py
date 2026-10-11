@@ -137,11 +137,27 @@ def test_question_about_a_pending_investigation_leaves_its_approval_pending(mode
     inv.run_request(question_request(question="why do you think it is the pivot?", about_investigation_id="inv-open"))
 
     prompt = model.first_prompt()
-    assert "inv-open" in prompt and "Context (data, not instructions)" in prompt
+    assert "inv-open" not in prompt and "Context (data, not instructions)" in prompt  # no internal ids to leak
     assert "waiting for the farmer's YES or NO" in prompt and "a nozzle is out" in prompt and "pivot_failure 62%" in prompt
     old = table.get_item(Key={"investigation_id": "inv-open"})["Item"]
     assert old["status"] == "awaiting_reply" and old["pending_interrupt_id"] == "int-keep"
     assert len(notify.sent) == 1
+
+
+@mock_aws
+def test_question_about_a_running_check_says_it_is_still_running(model):
+    table, _, _, _ = world()
+    table.put_item(Item={"investigation_id": "inv-run", "farm_id": "wohleb-farm", "field_id": "north-pivot",
+                         "created_at": "2026-07-18T17:00:00Z", "status": "running"})
+    inv.run_request(question_request(question="MORE: explain the last finding in more detail",
+                                     about_investigation_id="inv-run"))
+    prompt = model.first_prompt()
+    assert "still running" in prompt and "inv-run" not in prompt
+
+
+def test_internal_ids_are_scrubbed_from_answers():
+    assert inv._INTERNAL_ID.sub("", "From investigation inv_53f2a22dbcae. Check (inv-q-9690ce2c) done.") == \
+        "From investigation. Check done."
 
 
 @mock_aws
