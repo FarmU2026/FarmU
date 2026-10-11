@@ -26,6 +26,7 @@ from .common import geo_lambda, python_lambda
 BASELINE_USES_GEO_IMAGE = True
 MAP_CONCURRENCY = 5
 HANDLER_PREFIX = "cloud.lambdas.context"
+NASS_KEY_PARAM = "/fieldwatch/nass-api-key"  # SecureString (aws/ssm key), created by hand; read by the economics stage
 # Requirements for the zip Lambdas (LoadBoundary, water, disease, economics, Finalize) on top of
 # common.BASE_REQUIREMENTS: shapely for boundaries and the water stage (numpy comes with it). Bundles are per
 # requirement set (the list is part of the bundling command, see common.python_lambda), so a function that
@@ -80,6 +81,13 @@ class Context(Stack):
                 data.bucket.grant_read_write(fn, "context/*")
             if name == "crop":
                 data.bucket.grant_read_write(fn, "static/csb/*")
+            if name == "economics":
+                # NASS Quick Stats key: economics() reads it from SSM (decrypted with the AWS-managed aws/ssm key,
+                # so no KMS grant) and falls back to the planning defaults if it can't.
+                fn.add_environment("NASS_API_KEY_PARAM", NASS_KEY_PARAM)
+                fn.add_to_role_policy(iam.PolicyStatement(
+                    actions=["ssm:GetParameter"],
+                    resources=[f"arn:aws:ssm:{self.region}:{self.account}:parameter{NASS_KEY_PARAM}"]))
             stage_fns[name] = fn
 
         finalize = python_lambda(self, "Finalize", handler=f"{HANDLER_PREFIX}.finalize.handler",

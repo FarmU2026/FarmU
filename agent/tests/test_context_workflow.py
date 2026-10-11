@@ -528,3 +528,16 @@ def test_adapter_without_strands_uses_live_domain(monkeypatch):
     monkeypatch.setattr(context,"get_soil_profile",lambda field_id:SoilProfile(field_id=field_id,map_units=[]))
     result=adapters.get_soil_profile("different-field")
     assert not result.stub and result.value.field_id=="different-field"
+
+
+def test_economics_stage_reads_the_nass_key_from_ssm(machine):
+    _, template, ctx_stack = machine
+    fns = template.find_resources("AWS::Lambda::Function")
+    with_param = [r for r in fns.values() if "NASS_API_KEY_PARAM" in r["Properties"].get("Environment", {}).get("Variables", {})]
+    assert len(with_param) == 1  # only the economics stage
+    assert with_param[0]["Properties"]["Environment"]["Variables"]["NASS_API_KEY_PARAM"] == "/fieldwatch/nass-api-key"
+    statements = [s for p in template.find_resources("AWS::IAM::Policy").values()
+                  for s in p["Properties"]["PolicyDocument"]["Statement"] if s["Action"] == "ssm:GetParameter"]
+    assert len(statements) == 1
+    arn = json.dumps(statements[0]["Resource"])
+    assert "parameter/fieldwatch/nass-api-key" in arn and "AWS::Region" in arn and "AWS::AccountId" in arn

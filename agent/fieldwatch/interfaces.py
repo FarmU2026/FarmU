@@ -78,6 +78,7 @@ class Ssm:
     """SSM parameters. SecureStrings are created by hand (CloudFormation can't create them)."""
 
     LINK_SIGNING_KEY = "/fieldwatch/link-signing-key"  # SecureString: HMAC key for farmer links + dashboard token
+    NASS_API_KEY = "/fieldwatch/nass-api-key"  # SecureString: USDA NASS Quick Stats key (context economics stage)
     DASHBOARD_PASSCODE = "/fieldwatch/dashboard-passcode"  # SecureString: POST /v1/auth/dashboard
     TWILIO_AUTH_TOKEN = "/fieldwatch/twilio-auth-token"  # SecureString: Twilio REST + webhook signature
     RUNTIME_ARN = "/fieldwatch/runtime-arn"  # String: written by hand after `agentcore deploy`
