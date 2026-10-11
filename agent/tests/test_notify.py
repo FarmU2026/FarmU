@@ -138,6 +138,28 @@ def test_mirror_and_repairs_recipient(env):
     assert env['events'][0].person_id == 'son' and not env['deliveries']
 
 
+def test_mirror_send_is_immediate_despite_sms_optout_quiet_hours_and_cap(env):
+    env['service'].provider = MirrorProvider()
+    env['person'].update(opted_out=True, role='repairs', opt_in_at=None)
+    env['store'].put('farms', env['person'])
+    env['clock'].return_value = datetime(2026, 7, 19, 3, tzinfo=timezone.utc)
+    assert env['service'].person_for_role('wohleb-farm', 'repairs')['person_id'] == 'dad'
+    for number in range(4):
+        req = env['request'].model_copy(update={'approval': None, 'idempotency_key': f'web-{number}'})
+        assert env['service'].send(req).status == 'mirror_only'
+    assert not env['deliveries'] and not env['schedules']
+    assert len(env['events']) == 4
+
+
+def test_mirror_still_requires_signing_key_for_link_requests(env):
+    env['service'].provider = MirrorProvider()
+    env['service'].signing_key = lambda: b''
+    req = env['request'].model_copy(update={'link': {'scope': 'work_order', 'subject_id': 'act-test'}})
+    with pytest.raises(ValueError, match='signing key'):
+        env['service'].send(req)
+    assert not env['events'] and not env['deliveries']
+
+
 def test_signed_link_scoped_and_tamper_expiry_checked(env):
     request = env['request'].model_copy(update={'approval': None,
         'link': {'scope': 'report', 'subject_id': 'inv-1', 'ttl_hours': 24}})
@@ -226,6 +248,110 @@ def test_approval_reply_uses_ws8_once_and_only_one_resume_event(env):
     env['decision'].assert_called_once_with(approval_id=sent.approval_id, person_id='dad',
         decision='approved', channel='sms')
     assert [type(e) for e in env['events']] == [ApprovalRecorded, MessageReceived]
+
+
+def test_web_approval_and_work_order_use_interfaces_without_twilio(env, monkeypatch):
+    from fieldwatch import interfaces as I
+    from cloud.lambdas.notify import runtime, reply
+    env['service'].provider = MirrorProvider()
+    env['person']['opted_out'] = True
+    env['store'].put('farms', env['person'])
+    env['db'].create_table(TableName='fw-actions', BillingMode='PAY_PER_REQUEST',
+        AttributeDefinitions=[{'AttributeName': 'action_id', 'AttributeType': 'S'}],
+        KeySchema=[{'AttributeName': 'action_id', 'KeyType': 'HASH'}])
+    # Use the canonical WS8 seam, with its Dynamo backend on the same moto tables.
+    approvals = I.approvals()
+    monkeypatch.setattr(approvals, 'clock', lambda: NOW)
+    approvals.use_store(approvals.DynamoStore(env['db'], prefix='fw-'))
+    approvals.set_event_sink(lambda *args: None)
+    I.use_notify(env['service'])
+    env['service'].record_decision = runtime.record_decision
+    monkeypatch.setattr(reply, 'service', lambda **kwargs: env['service'])
+    try:
+        sent = I.notify().send(env['request'])
+        event = inbound(provider_message_id='mirror:web-approval', in_reply_to=sent.message_id).model_dump()
+        reply.mirror_handler(event, None)
+        reply.mirror_handler(event, None)
+        approved = I.approvals().get(sent.approval_id)
+        assert approved.status == 'approved' and approved.channel == 'web'
+        action = I.actions().create_work_order(approval_id=sent.approval_id,
+            investigation_id=env['request'].investigation_id, assignee_person_id='dad',
+            field_id='north-pivot', farm_id='wohleb-farm', instructions='Check the outer nozzles.')
+        again = I.actions().create_work_order(approval_id=sent.approval_id,
+            investigation_id=env['request'].investigation_id, assignee_person_id='dad',
+            field_id='north-pivot', farm_id='wohleb-farm', instructions='Check the outer nozzles.')
+        assert again.action_id == action.action_id
+        assert env['db'].Table('fw-actions').scan()['Count'] == 1
+        out = [r for r in env['db'].Table('fw-messages').scan()['Items'] if r['direction'] == 'out']
+        assert len(out) == 2 and all(r['status'] == 'mirror_only' for r in out)
+        assert len([e for e in env['events'] if isinstance(e, ApprovalRecorded)]) == 1
+        assert not env['deliveries']
+    finally:
+        I.use_notify(None)
+        approvals.use_store(None)
+        approvals.set_event_sink(None)
+
+
+def test_provider_id_cannot_select_web_approval_semantics(env):
+    env['person']['opted_out'] = True
+    env['store'].put('farms', env['person'])
+    result = env['service'].reply(inbound(provider_message_id='mirror:untrusted'))
+    assert 'stopped' in result['response_text']
+    env['decision'].assert_not_called()
+
+
+@pytest.mark.parametrize('enabled', ['false', 'true'])
+def test_private_mirror_runtime_never_initializes_twilio(env, monkeypatch, enabled):
+    from cloud.lambdas.notify import runtime, reply
+    monkeypatch.setenv('SMS_ENABLED', enabled)
+    monkeypatch.setenv('FIELDWATCH_SMS', 'twilio')
+    monkeypatch.delenv('TWILIO_ACCOUNT_SID', raising=False)
+    monkeypatch.delenv('TWILIO_FROM', raising=False)
+    forbidden = Mock(side_effect=AssertionError('Twilio configuration was accessed'))
+    monkeypatch.setattr(runtime, 'twilio_token', forbidden)
+    monkeypatch.setattr(runtime, 'TwilioProvider', forbidden)
+    monkeypatch.setattr(runtime, 'EventEmitter', lambda *args: env['events'].append)
+    runtime.service.cache_clear()
+    try:
+        service = runtime.service(mirror=True)
+        assert service.provider.name == 'mirror-only'
+        if enabled == 'false':
+            assert runtime.service().provider.name == 'mirror-only'
+            assert runtime.service().send(env['request']).status == 'mirror_only'
+        service.clock = lambda: NOW
+        result = reply.mirror_handler(inbound('What should I check?', provider_message_id='mirror:no-token').model_dump(), None)
+        assert result['status'] == 'received'
+        forbidden.assert_not_called()
+    finally:
+        runtime.service.cache_clear()
+
+
+def test_public_webhook_dormant_and_missing_token_fail_closed(monkeypatch):
+    from cloud.lambdas.notify import reply
+    from botocore.exceptions import ClientError
+    forbidden = Mock(side_effect=AssertionError('Dormant webhook touched transport'))
+    monkeypatch.setenv('SMS_ENABLED', 'false')
+    monkeypatch.setattr(reply, 'twilio_token', forbidden)
+    monkeypatch.setattr(reply, 'service', forbidden)
+    assert reply.handler({}, None)['statusCode'] == 503
+    forbidden.assert_not_called()
+    monkeypatch.setenv('SMS_ENABLED', 'true')
+    monkeypatch.setattr(reply, 'twilio_token', Mock(side_effect=ClientError(
+        {'Error': {'Code': 'ParameterNotFound'}}, 'GetParameter')))
+    assert reply.handler({}, None)['statusCode'] == 503
+    forbidden.assert_not_called()
+
+
+def test_public_webhook_still_rejects_bad_signature_when_enabled(env, monkeypatch):
+    from cloud.lambdas.notify import reply
+    monkeypatch.setenv('SMS_ENABLED', 'true')
+    monkeypatch.setenv('FIELDWATCH_TWILIO_WEBHOOK_URL', 'https://fieldwatch.example/sms/inbound')
+    monkeypatch.setattr(reply, 'twilio_token', lambda: 'test-token')
+    monkeypatch.setattr(reply, 'service', lambda: env['service'])
+    event = {'body': urlencode({'From': '+14025550100', 'Body': 'YES', 'MessageSid': 'mirror:untrusted'}),
+             'headers': {'x-twilio-signature': 'invalid', 'content-type': 'application/x-www-form-urlencoded'}}
+    assert reply.handler(event, None)['statusCode'] == 403
+    assert not env['events']
 
 
 @pytest.mark.parametrize('text', ['STOP', 'HELP', 'START'])

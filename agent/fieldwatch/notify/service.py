@@ -66,7 +66,8 @@ class Notifications:
 
     def person_for_role(self, farm_id, role):
         people = [p for p in self.store.query('farms', 'farm_id', farm_id)
-                  if p['item'].startswith('PERSON#') and p.get('role') == role and not p.get('opted_out')]
+                  if p['item'].startswith('PERSON#') and p.get('role') == role and
+                  (self.provider.name == 'mirror-only' or not p.get('opted_out'))]
         if len(people) != 1:
             raise ValueError('Select an explicit person when a role has zero or multiple recipients')
         return people[0]
@@ -97,7 +98,8 @@ class Notifications:
             raise ValueError('Unknown farm or recipient')
         key = 'notify-send#' + identifier('', request.farm_id + '\0' + request.idempotency_key)
         message_id = identifier('msg-', key)
-        if person.get('opted_out') or (self.provider.name != 'mirror-only' and not person.get('opt_in_at')):
+        sms = self.provider.name != 'mirror-only'
+        if sms and (person.get('opted_out') or not person.get('opt_in_at')):
             return SendMessageResult(message_id=message_id, status='opted_out', provider=self.provider.name)
         fingerprint = hashlib.sha256(request.model_dump_json().encode()).hexdigest()
         with self.store.lock(key, now):
@@ -121,7 +123,8 @@ class Notifications:
                 Approval(approval_id='pending', investigation_id=request.investigation_id,
                     action_type=request.approval['action_type'], summary=request.body,
                     sent_to_person_id=request.person_id, status='pending', expires_at=iso(now))
-            until = quiet_until(now, farm.get('timezone', 'America/Chicago'), farm.get('quiet_hours'))
+            # Quiet hours and the daily cap govern external texts, not an interactive web conversation.
+            until = quiet_until(now, farm.get('timezone', 'America/Chicago'), farm.get('quiet_hours')) if sms else None
             if request.urgency != 'urgent' and until:
                 self.defer(message_id, until, request)
                 result = SendMessageResult(message_id=message_id, status='deferred_quiet_hours',
@@ -130,7 +133,7 @@ class Notifications:
                 self._save(state)
                 return result
             day = now.astimezone(ZoneInfo(farm.get('timezone', 'America/Chicago'))).date().isoformat()
-            if request.urgency != 'urgent' and not self.store.reserve_daily(
+            if sms and request.urgency != 'urgent' and not self.store.reserve_daily(
                     request.farm_id, day, message_id, self.daily_cap, now):
                 result = SendMessageResult(message_id=message_id, status='rate_limited', provider=self.provider.name)
                 state['result'] = result.model_dump()
@@ -205,7 +208,12 @@ class Notifications:
             and r.get('created_at') and now - timedelta(days=7) <= parse(r['created_at']) <= now]
         return max(candidates, key=lambda r: r['created_at'], default={}).get('investigation_id')
 
-    def reply(self, message):
+    def reply(self, message, *, channel='sms'):
+        # Only the authenticated private mirror handler selects this mode. A provider ID is data,
+        # so a public Twilio request cannot choose web approval semantics through its namespace.
+        if channel not in {'sms', 'mirror'}:
+            raise ValueError('Unsupported reply channel')
+        decision_channel = 'web' if channel == 'mirror' else 'sms'
         message = InboundMessage.model_validate(message)
         now = self.clock()
         key = 'notify-in#' + identifier('', message.provider_message_id)
@@ -227,7 +235,7 @@ class Notifications:
                 response_text = {'stop': 'FieldWatch texts stopped. Reply START to resume.',
                     'start': 'FieldWatch texts resumed. Reply STOP to stop.',
                     'help': 'FieldWatch watches your fields. Reply MORE for details or STOP to stop texts.'}[intent]
-            elif person.get('opted_out'):
+            elif channel == 'sms' and person.get('opted_out'):
                 response_text = 'FieldWatch texts are stopped. Reply START to resume.'
             else:
                 approval = state.get('decision_request') or (
@@ -241,14 +249,14 @@ class Notifications:
                         state['decision_request'] = approval
                         self._save(state)
                         decided = self.record_decision(approval_id=approval['approval_id'],
-                            person_id=person['person_id'], decision=decision, channel='sms')
+                            person_id=person['person_id'], decision=decision, channel=decision_channel)
                         decided = Approval.model_validate(decided)
                         if (decided.status == decision and decided.decided_by == person['person_id'] and
                                 decided.approval_id == approval['approval_id'] and
                                 decided.investigation_id == investigation_id):
                             events.append(ApprovalRecorded(occurred_at=decided.decided_at or iso(now),
                                 approval_id=approval['approval_id'], investigation_id=investigation_id,
-                                decision=decision, decided_by=person['person_id'], channel='sms'))
+                                decision=decision, decided_by=person['person_id'], channel=decision_channel))
                         else:
                             response_text = 'Already decided by ' + str(decided.decided_by or 'another person') + '.'
                 else:

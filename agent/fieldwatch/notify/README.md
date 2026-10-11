@@ -8,19 +8,26 @@ paths belong to other owners. No polling is used by this package.
 The service has injected storage, provider, clock, event publisher, scheduler,
 link key, and approval decision function. Unit tests use moto and fakes.
 
+The active direction is web conversation with SMS dormant. See
+[WEB_HANDOFF.md](WEB_HANDOFF.md) for behavior and the WS12/WS13/WS14 integration
+handoff. Keep `SmsEnabled=false`; the private mirror runtime never loads Twilio
+credentials, and the disabled public SMS endpoint fails closed.
+
 ## Rules and storage
 
 - A person is `fw-farms`: `{farm_id, item: "PERSON#<person_id>", person_id,
   phone_e164, role, opted_out, opt_in_at}`. Real SMS requires `opt_in_at` and no opt-out.
-  Mirror-only messages require no real-SMS consent, but still respect opt-out.
+  Mirror-only messages require no real-SMS consent; SMS opt-out does not block web messages.
 - Farm settings are `{farm_id, item: "FARM", timezone: "America/Chicago",
   quiet_hours: {start: "21:00", end: "07:00"}}`. An absent quiet-hours setting
   disables deferral; equal endpoints also disable it. Time windows are start-inclusive,
   end-exclusive, with daylight saving handled in the farm's IANA time zone.
-- Two nonurgent messages per farm per local calendar day, as specified in core-features.
+- Two nonurgent SMS messages per farm per local calendar day, as specified in core-features.
   Urgent messages bypass quiet hours and the cap. Deferred sends recheck both rules
   and opt-out, and generate fresh links/approval expirations at delivery time.
-- `person_for_role(farm_id, "repairs")` resolves a unique role choice without an opt-out;
+  Mirror-only sends bypass quiet hours and this cap for immediate web conversation.
+- `person_for_role(farm_id, "repairs")` resolves a unique role choice; SMS excludes opt-outs,
+  while mirror delivery includes them.
   callers must choose a person explicitly if several people have the same role.
   Send always targets the supplied `person_id`; it never substitutes the operator.
 - Request idempotency is farm-scoped. Reusing a key for different content is an error.
@@ -50,16 +57,15 @@ is `{request: <SendMessageRequest>, scheduled: true}` and is only for private in
 **WS8:** the lazy adapter in `cloud/lambdas/notify/runtime.py` calls:
 
 ```python
-fieldwatch.approvals.record_decision(
-    approval_id=approval_id, person_id=person_id,
-    decision="approved",  # or "declined"
-    channel="sms",
+interfaces.approvals().record_decision(
+    approval_id, "approved", person_id, channel,  # or "declined"; channel is sms or web
+    from_phone=recipient_phone, emit=False,
 )  # returns contracts.Approval (or its exact dict)
 ```
 
-WS8's module is absent in this checkout. Until it lands, approval replies fail closed.
-The function must enforce pending status, recipient and expiry atomically, returning
-the existing decision on retries/races. WS9 emits `ApprovalRecorded` for the returned
+The adapter uses WS8 through `fieldwatch.interfaces`; its decision function enforces
+pending status, recipient and expiry atomically. The adapter retrieves the stored
+approval on already-decided, expired or policy-denied replies. WS9 emits `ApprovalRecorded` for the returned
 decision and never also emits `ReplyReceived` for that reply. WS8 must not independently
 publish that same event from this function. The adapter is the only place to reconcile
 a different WS8 function signature. Pending approvals created by send include the
