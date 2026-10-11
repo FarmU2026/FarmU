@@ -74,6 +74,8 @@ class AnomalyRegion(Contract):
     centroid: LonLat
     score: float = Field(description="Combined anomaly score; higher is more unusual")
     features: PatternFeatures
+    where: str | None = Field(default=None, description="Plain-words location, e.g. 'south-west part of the field'; "
+                                                         "computed from the geometry, use it instead of the coordinates")
 
 
 class OverlayRef(Contract):

@@ -69,6 +69,25 @@ def _centroid(mask: np.ndarray, grid: Grid) -> tuple[float, float]:
     return round(float(lon), 6), round(float(lat), 6)
 
 
+def where_in_field(mask: np.ndarray, inside: np.ndarray, grid: Grid) -> str | None:
+    """Plain-words location of a region, computed in lon/lat (so raster orientation can't flip it): which third of
+    the field's north-south and east-west extent its center falls in. Agents use this instead of guessing a
+    direction from coordinates (Oct 11: an agent called a south-west patch the "north-east corner")."""
+    rr, cc = np.nonzero(inside)
+    if not len(rr) or not mask.any():
+        return None
+    if mask.sum() >= 0.5 * len(rr):
+        return "much of the field"
+    lons, lats = grid.pix_to_lonlat(rr, cc)
+    lon, lat = _centroid(mask, grid)
+    x = (lon - lons.min()) / max(float(lons.max() - lons.min()), 1e-9)
+    y = (lats.max() - lat) / max(float(lats.max() - lats.min()), 1e-9)  # 0 = north edge
+    ns = "north" if y < 1 / 3 else "south" if y > 2 / 3 else ""
+    ew = "west" if x < 1 / 3 else "east" if x > 2 / 3 else ""
+    part = f"{ns}-{ew}" if ns and ew else ns or ew
+    return f"{part} part of the field" if part else "middle of the field"
+
+
 def analyze_stacks(current: IndexStack, history: list[IndexStack], previous: IndexStack | None, *,
                    crop: str = "corn", pivot: Pivot | None = None, layers: Layers | None = None,
                    z_threshold: float = 2.0, min_region_acres: float = 1.2) -> CoreResult:
@@ -113,6 +132,7 @@ def analyze_stacks(current: IndexStack, history: list[IndexStack], previous: Ind
             region_id=f"r{i}", geometry=region_geometry(m, grid),
             area_acres=round(float(m.sum()) * grid.pixel_acres, 2), centroid=_centroid(m, grid),
             score=round(float(-np.nanmean(zs[m])), 2), features=C.PatternFeatures(**f),
+            where=where_in_field(m, current.inside, grid),
         ))
     regional = G.uniform_drop(diff, z_base, z_threshold)
     score = max((r.score for r in out_regions), default=0.0)

@@ -69,7 +69,8 @@ SPECIALIST_JOBS: dict[str, str] = {
         "You read the satellite pass. Call get_scene_analysis or analyze_field for the pre-computed pattern and "
         "look_at_field to see the images, with the field id, before answering. Rings and arcs mean irrigation, "
         "straight edges mean weather or a sprayer pass, irregular blotches mean soil, pests or disease. Note the "
-        "scene date."
+        "scene date. Say where a region is ONLY with its `where` value (e.g. 'south-west part of the field'); "
+        "never work out a direction from coordinates."
     ),
     "environment": (
         "You check whether weather, hail, drought, soil or terrain explain the stress. Compare rain to normal. "
