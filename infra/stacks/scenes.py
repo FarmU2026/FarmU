@@ -108,6 +108,8 @@ class Scenes(Stack):
         t["fw-fields"].grant_read_data(self.reset_fn)
         for name in ("fw-scene-analyses", "fw-idempotency", "fw-investigations", "fw-approvals", "fw-actions"):
             t[name].grant_read_write_data(self.reset_fn)
+        data.bucket.grant_read(self.reset_fn, "sessions/*")  # list + delete the reset investigations' agent sessions
+        data.bucket.grant_delete(self.reset_fn, "sessions/*")
 
         # ---------- scheduled "check latest" (T34's cheap alternative to the SNS subscription) ----------
         self.check_fn = python_lambda(self, "CheckLatest", handler=HANDLER + "check_latest.handler",

@@ -26,6 +26,21 @@ def _delete(table_short: str, keys: list[dict]) -> int:
     return len(keys)
 
 
+def _delete_sessions(inv_ids: set[str]) -> int:
+    """The agent's saved Strands sessions (S3SessionManager, sessions/session_fieldwatch-<inv>/) for these
+    investigations. A replay reuses the investigation id (field + date), and a session left paused at an approval
+    makes the next start fail ("must resume from interrupt"), so it goes with the investigation row."""
+    s3, bucket, n = cm.client("s3"), cm.bucket(), 0
+    for inv in sorted(inv_ids):
+        pages = s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=f"sessions/session_fieldwatch-{inv}/")
+        for page in pages:
+            keys = [{"Key": o["Key"]} for o in page.get("Contents", [])]
+            if keys:
+                s3.delete_objects(Bucket=bucket, Delete={"Objects": keys, "Quiet": True})
+                n += len(keys)
+    return n
+
+
 def reset(farm_id: str) -> dict:
     fields = [r["field_id"] for r in cm.query_all(
         cm.table("fields"), KeyConditionExpression="farm_id = :f", ExpressionAttributeValues={":f": farm_id})]
@@ -54,6 +69,7 @@ def reset(farm_id: str) -> dict:
             if r.get("replay") is True or r.get("anomaly_id") in anomaly_ids:
                 inv_ids.add(r["investigation_id"])
     deleted["fw-investigations"] = _delete("investigations", [{"investigation_id": i} for i in sorted(inv_ids)])
+    deleted["agent-sessions"] = _delete_sessions(inv_ids)
 
     # 4. approvals and actions of those investigations (no index on investigation_id: scan, demo-sized tables)
     for short, pk in (("approvals", "approval_id"), ("actions", "action_id")):

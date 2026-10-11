@@ -670,10 +670,15 @@ class TestReset:
 
     def test_deletes_only_replay_state_for_the_demo_farm(self, aws):
         self.seed()
+        s3 = boto3.client("s3", region_name="us-west-2")
+        for inv_id in ("inv-1", "inv-live"):  # a paused session would make the next replay's start fail
+            s3.put_object(Bucket="fw-test-bucket", Key=f"sessions/session_fieldwatch-{inv_id}/session.json", Body=b"{}")
         out = reset.handler({"farm_id": FARM})
         assert out["farm_id"] == FARM
-        assert out["deleted"] == {"fw-scene-analyses": 1, "fw-investigations": 2, "fw-approvals": 1, "fw-actions": 1,
-                                  "fw-idempotency": 3}
+        assert out["deleted"] == {"fw-scene-analyses": 1, "fw-investigations": 2, "agent-sessions": 1,
+                                  "fw-approvals": 1, "fw-actions": 1, "fw-idempotency": 3}
+        left = [o["Key"] for o in s3.list_objects_v2(Bucket="fw-test-bucket", Prefix="sessions/").get("Contents", [])]
+        assert left == ["sessions/session_fieldwatch-inv-live/session.json"]  # live sessions are kept
         db = cm.ddb()
         ids = lambda name, k: {r[k] for r in cm.scan_all(db.Table(name))}  # noqa: E731
         assert ids("fw-investigations", "investigation_id") == {"inv-live", "inv-other"}
