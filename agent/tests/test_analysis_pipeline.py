@@ -159,3 +159,58 @@ def test_live_summer_field():
     assert res.date <= "2025-08-22" and res.clear_fraction >= 0.7
     assert 0.3 < res.indices.ndvi.p50 < 1.0
     assert res.gates.senescence is False
+
+
+# ---------- overlays reach S3 only from the scene analyze Lambda ----------
+
+def _fake_loader_for_registry(monkeypatch):
+    import fieldwatch.analysis.analyzer as az
+    monkeypatch.setattr(az, "StacLoader", lambda *a, **k: FakeLoader(scenes(), problem_on=date(2026, 7, 18)))
+
+
+def _registry_request():
+    return req().model_dump(mode="json")
+
+
+def test_scene_analyze_handler_writes_overlays_to_s3(monkeypatch):
+    import boto3
+    from moto import mock_aws
+    from cloud.lambdas.scenes import analyze as scene_analyze
+    _fake_loader_for_registry(monkeypatch)
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-west-2")
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+    monkeypatch.setenv("FIELDWATCH_BUCKET", "fw-test")
+    with mock_aws():
+        s3 = boto3.client("s3", region_name="us-west-2")
+        s3.create_bucket(Bucket="fw-test", CreateBucketConfiguration={"LocationConstraint": "us-west-2"})
+        out = scene_analyze.handler(_registry_request())
+        for kind in ("true_color", "health", "mask"):
+            key = out["overlays"][kind]["key"]
+            assert key.startswith("analysis/") and key.endswith(f"/s2/{kind}.png")
+            obj = s3.get_object(Bucket="fw-test", Key=key)
+            assert obj["ContentType"] == "image/png" and obj["Body"].read()[:4] == b"\x89PNG"
+
+
+def test_scene_analyze_handler_writes_nothing_without_bucket(monkeypatch):
+    from cloud.lambdas.scenes import analyze as scene_analyze
+    _fake_loader_for_registry(monkeypatch)
+    monkeypatch.delenv("FIELDWATCH_BUCKET", raising=False)
+    puts = []
+    monkeypatch.setattr("fieldwatch.analysis.analyzer.NullWriter.put", lambda self, *a, **k: puts.append(a[0]))
+    out = scene_analyze.handler(_registry_request())
+    assert out["overlays"]["health"]["key"] and len(puts) == 3  # went to NullWriter, no S3 client was built
+
+
+def test_registry_path_outside_scene_lambda_is_null_writer(monkeypatch):
+    from fieldwatch import registry
+    from fieldwatch.analysis.writer import NullWriter, current_writer
+    monkeypatch.setenv("FIELDWATCH_BUCKET", "fw-test")  # the Gateway Lambda has this too; it must not matter
+    assert isinstance(current_writer(), NullWriter)
+    seen = {}
+    import fieldwatch.analysis as an
+    monkeypatch.setattr(an, "analyze", lambda r, writer=None, **k: seen.setdefault("w", writer) or C.FieldAnalysisResult)
+    try:
+        registry.analyze_field(**_registry_request())
+    except Exception:
+        pass
+    assert isinstance(seen["w"], NullWriter)
