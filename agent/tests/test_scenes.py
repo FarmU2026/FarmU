@@ -364,6 +364,21 @@ def decide_event(result=None, scene=None, replay=False, **req_changes) -> dict:
             "replay_id": "rpl_1" if replay else None}
 
 
+def with_comparison(result: dict) -> dict:
+    """The sample result plus the departure / change / normal overlays and their captions."""
+    ov = result["overlays"]
+    for kind in ("departure", "change", "normal"):
+        ov[kind] = {"key": f"analysis/north-pivot/2026-07-18/s2/{kind}.png", "bounds": ov["health"]["bounds"]}
+    result["comparison"] = {
+        "scene_date": "2026-07-18", "previous_date": "2026-07-13",
+        "baseline_dates": ["2023-07-15", "2024-07-18", "2025-07-16"], "baseline_method": "median",
+        "median_departure_ndvi": -0.01,
+        "departure_scale": {"stat": "z", "vmin": -3.0, "vmax": 3.0, "unit": "standard deviations"},
+        "change_scale": {"stat": "ndvi_diff", "vmin": -0.25, "vmax": 0.25, "unit": "NDVI"},
+    }
+    return result
+
+
 class TestDecisionRule:
     def ev(self, **changes):
         return decide.evaluate(C.FieldAnalysisResult.model_validate(sample_result(**changes)), 2.0, 1.2, FIELD, "2026-07-18")
@@ -427,6 +442,29 @@ class TestDecide:
         assert ad.overlays.true_color.key and ad.open_watch_ids == []
         assert {e["Source"] for e in aws.events.entries} == {"fieldwatch.scenes"}
         assert {e["EventBusName"] for e in aws.events.entries} == {"fieldwatch"}
+
+    def test_stores_the_comparison_overlays_and_their_captions_on_the_row(self, aws):
+        result = with_comparison(sample_result())
+        decide.handler(decide_event(result=result))
+        row = cm.to_native(cm.table("scene-analyses").get_item(
+            Key={"field_id": FIELD, "date_source": "2026-07-18#sentinel-2-c1-l2a"})["Item"])
+        for kind in ("departure", "change", "normal"):
+            assert row["overlays"][kind]["key"] == f"analysis/north-pivot/2026-07-18/s2/{kind}.png"
+            assert len(row["overlays"][kind]["bounds"]) == 4
+        comp = row["comparison"]
+        assert comp["scene_date"] == "2026-07-18" and comp["previous_date"] == "2026-07-13"
+        assert comp["baseline_dates"] == ["2023-07-15", "2024-07-18", "2025-07-16"]
+        assert comp["departure_scale"]["vmin"] == -3 and comp["change_scale"]["vmax"] == 0.25
+        # the detection and the events are what they were without the extras
+        assert row["emit"] is True and row["max_score"] == 3.1
+        (anomaly,) = aws.events.of("AnomalyDetected")
+        assert C.AnomalyDetected.model_validate(anomaly).overlays.departure.key.endswith("/departure.png")
+
+    def test_a_result_without_a_comparison_still_stores(self, aws):
+        decide.handler(decide_event())
+        row = cm.to_native(cm.table("scene-analyses").get_item(
+            Key={"field_id": FIELD, "date_source": "2026-07-18#sentinel-2-c1-l2a"})["Item"])
+        assert row["comparison"] is None and set(row["overlays"]) >= {"true_color", "health"}
 
     def test_live_scene_is_not_flagged_as_replay(self, aws):
         decide.handler(decide_event(replay=False))
@@ -632,10 +670,15 @@ class TestReset:
 
     def test_deletes_only_replay_state_for_the_demo_farm(self, aws):
         self.seed()
+        s3 = boto3.client("s3", region_name="us-west-2")
+        for inv_id in ("inv-1", "inv-live"):  # a paused session would make the next replay's start fail
+            s3.put_object(Bucket="fw-test-bucket", Key=f"sessions/session_fieldwatch-{inv_id}/session.json", Body=b"{}")
         out = reset.handler({"farm_id": FARM})
         assert out["farm_id"] == FARM
-        assert out["deleted"] == {"fw-scene-analyses": 1, "fw-investigations": 2, "fw-approvals": 1, "fw-actions": 1,
-                                  "fw-idempotency": 3}
+        assert out["deleted"] == {"fw-scene-analyses": 1, "fw-investigations": 2, "agent-sessions": 1,
+                                  "fw-approvals": 1, "fw-actions": 1, "fw-idempotency": 3}
+        left = [o["Key"] for o in s3.list_objects_v2(Bucket="fw-test-bucket", Prefix="sessions/").get("Contents", [])]
+        assert left == ["sessions/session_fieldwatch-inv-live/session.json"]  # live sessions are kept
         db = cm.ddb()
         ids = lambda name, k: {r[k] for r in cm.scan_all(db.Table(name))}  # noqa: E731
         assert ids("fw-investigations", "investigation_id") == {"inv-live", "inv-other"}

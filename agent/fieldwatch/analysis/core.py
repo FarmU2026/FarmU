@@ -28,6 +28,11 @@ class CoreResult:
     gates: C.Gates
     z: np.ndarray | None = None                       # smoothed z map (NaN outside valid pixels)
     region_masks: list[np.ndarray] = field(default_factory=list)  # aligned with anomaly.regions
+    # Arrays the overlays are drawn from (render only; nothing here feeds the decision):
+    baseline: np.ndarray | None = None                # per-pixel NDVI expected for this date (regions.baseline_mean)
+    change: np.ndarray | None = None                  # NDVI now - previous pass where both are clear, else NaN
+    median_departure: float | None = None             # median of (NDVI now - baseline) over valid pixels
+    baseline_method: str | None = None                # "median" (>= 3 seasons) or "mean"
 
 
 def _stats(a: np.ndarray, valid: np.ndarray) -> C.IndexStats:
@@ -64,14 +69,35 @@ def _centroid(mask: np.ndarray, grid: Grid) -> tuple[float, float]:
     return round(float(lon), 6), round(float(lat), 6)
 
 
+def where_in_field(mask: np.ndarray, inside: np.ndarray, grid: Grid) -> str | None:
+    """Plain-words location of a region, computed in lon/lat (so raster orientation can't flip it): which third of
+    the field's north-south and east-west extent its center falls in. Agents use this instead of guessing a
+    direction from coordinates (Oct 11: an agent called a south-west patch the "north-east corner")."""
+    rr, cc = np.nonzero(inside)
+    if not len(rr) or not mask.any():
+        return None
+    if mask.sum() >= 0.5 * len(rr):
+        return "much of the field"
+    lons, lats = grid.pix_to_lonlat(rr, cc)
+    lon, lat = _centroid(mask, grid)
+    x = (lon - lons.min()) / max(float(lons.max() - lons.min()), 1e-9)
+    y = (lats.max() - lat) / max(float(lats.max() - lats.min()), 1e-9)  # 0 = north edge
+    ns = "north" if y < 1 / 3 else "south" if y > 2 / 3 else ""
+    ew = "west" if x < 1 / 3 else "east" if x > 2 / 3 else ""
+    part = f"{ns}-{ew}" if ns and ew else ns or ew
+    return f"{part} part of the field" if part else "middle of the field"
+
+
 def analyze_stacks(current: IndexStack, history: list[IndexStack], previous: IndexStack | None, *,
                    crop: str = "corn", pivot: Pivot | None = None, layers: Layers | None = None,
                    z_threshold: float = 2.0, min_region_acres: float = 1.2) -> CoreResult:
     grid = current.grid
     indices = index_stats(current)
     delta = None
+    change = None
     if previous is not None:
         both = current.valid & previous.valid
+        change = np.where(both, current.ndvi - previous.ndvi, np.nan).astype("float32")
         if both.any():
             delta = round(float(np.median(current.ndvi[both] - previous.ndvi[both])), 3)
     senescence, harvest = G.seasonal(crop, current.date, delta_since_last=delta, ndvi_p50=indices.ndvi.p50)
@@ -80,7 +106,7 @@ def analyze_stacks(current: IndexStack, history: list[IndexStack], previous: Ind
         return CoreResult(
             status="no_baseline", indices=indices,
             anomaly=C.AnomalySummary(field_score=0.0, z_baseline=None, z_cohort=None, delta_since_last=delta, regions=[]),
-            gates=C.Gates(senescence=senescence, harvest=harvest, regional=False),
+            gates=C.Gates(senescence=senescence, harvest=harvest, regional=False), change=change,
         )
 
     hist_ndvi = [h.ndvi for h in history]
@@ -88,7 +114,9 @@ def analyze_stacks(current: IndexStack, history: list[IndexStack], previous: Ind
     diff = np.where(current.valid, current.ndvi - base, np.nan)
     finite = diff[np.isfinite(diff)]
     z_base = None
+    median_departure = None
     if finite.size:
+        median_departure = round(float(np.median(finite)), 3)
         z_base = round(float(np.median(finite)) / regions.season_sd(hist_ndvi), 2)
 
     zpix = regions.pixel_z(diff)
@@ -104,6 +132,7 @@ def analyze_stacks(current: IndexStack, history: list[IndexStack], previous: Ind
             region_id=f"r{i}", geometry=region_geometry(m, grid),
             area_acres=round(float(m.sum()) * grid.pixel_acres, 2), centroid=_centroid(m, grid),
             score=round(float(-np.nanmean(zs[m])), 2), features=C.PatternFeatures(**f),
+            where=where_in_field(m, current.inside, grid),
         ))
     regional = G.uniform_drop(diff, z_base, z_threshold)
     score = max((r.score for r in out_regions), default=0.0)
@@ -112,5 +141,6 @@ def analyze_stacks(current: IndexStack, history: list[IndexStack], previous: Ind
         anomaly=C.AnomalySummary(field_score=score, z_baseline=z_base, z_cohort=None,
                                  delta_since_last=delta, regions=out_regions),
         gates=C.Gates(senescence=senescence, harvest=harvest, regional=regional),
-        z=zs, region_masks=masks,
+        z=zs, region_masks=masks, baseline=base, change=change, median_departure=median_departure,
+        baseline_method="median" if len(hist_ndvi) >= 3 else "mean",
     )

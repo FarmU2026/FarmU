@@ -74,6 +74,8 @@ class AnomalyRegion(Contract):
     centroid: LonLat
     score: float = Field(description="Combined anomaly score; higher is more unusual")
     features: PatternFeatures
+    where: str | None = Field(default=None, description="Plain-words location, e.g. 'south-west part of the field'; "
+                                                         "computed from the geometry, use it instead of the coordinates")
 
 
 class OverlayRef(Contract):
@@ -112,6 +114,30 @@ class Overlays(Contract):
     true_color: OverlayRef
     health: OverlayRef
     mask: OverlayRef | None = None
+    departure: OverlayRef | None = Field(default=None, description="smoothed z vs this field's normal (the statistic regions are found on)")
+    change: OverlayRef | None = Field(default=None, description="NDVI now minus the previous clear pass; None without a previous pass")
+    normal: OverlayRef | None = Field(default=None, description="baseline NDVI (same palette as health); None without a baseline")
+
+
+class OverlayScale(Contract):
+    """Fixed color scale of a diverging overlay, so images from different dates are comparable."""
+
+    stat: str = Field(description="what a pixel encodes, e.g. 'z' or 'ndvi_diff'")
+    vmin: float = Field(description="value drawn as the strongest red (below normal / decline)")
+    vmax: float = Field(description="value drawn as the strongest blue (above normal / gain); 0 is the light neutral")
+    unit: str = ""
+
+
+class OverlayComparison(Contract):
+    """What the departure / change / normal overlays compare, for honest captions."""
+
+    scene_date: ISODate = Field(description="date of the scene analyzed (the 'now' in every overlay)")
+    previous_date: ISODate | None = Field(default=None, description="previous clear pass used by `change`; None if none")
+    baseline_dates: list[ISODate] = Field(default_factory=list, description="scene dates of the prior seasons behind `normal` and `departure`, oldest first")
+    baseline_method: Literal["median", "mean"] | None = Field(default=None, description="per-pixel combination of the baseline seasons")
+    median_departure_ndvi: float | None = Field(default=None, description="field-wide median of (NDVI now - baseline); `departure` is relative to this")
+    departure_scale: OverlayScale | None = None
+    change_scale: OverlayScale | None = None
 
 
 class SceneInfo(Contract):
@@ -149,6 +175,7 @@ class FieldAnalysisResult(Contract):
     anomaly: AnomalySummary | None = None
     gates: Gates | None = None
     overlays: Overlays | None = None
+    comparison: OverlayComparison | None = None
     analysis_key: str | None = None
     error: ErrorDetail | None = None
 

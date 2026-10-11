@@ -11,7 +11,7 @@ from fieldwatch import contracts as C
 from fieldwatch.hooks import ToolTimeline
 from runtime_support import REGION, FakeModel, _text, _tool_use, make_bus_with_queue, make_investigations_table
 
-WRITE_AND_MESSAGE_TOOLS = {"create_work_order", "create_scout_pin", "request_photo", "send_farmer_message"}
+WRITE_AND_MESSAGE_TOOLS = {"create_work_order", "create_scout_pin", "send_farmer_message"}  # request_photo is off
 QUESTION = "Explain the data you have access to."
 
 
@@ -153,6 +153,22 @@ def test_question_about_a_running_check_says_it_is_still_running(model):
                                      about_investigation_id="inv-run"))
     prompt = model.first_prompt()
     assert "still running" in prompt and "inv-run" not in prompt
+
+
+@mock_aws
+def test_why_question_gets_the_scorers_reasons(model):
+    table, _, _, _ = world()
+    expl = {"top_condition": "ponding", "label": "Standing water / waterlogging", "how_sure": "fairly sure",
+            "hypotheses": [{"condition": "ponding", "percent": 64}],
+            "why": {"for": ["The bare area sits in the field's lowest ground"], "against": [],
+                    "ruled_out": [{"condition": "Pivot not watering", "reason": "No ring or wedge shape"}]}}
+    table.put_item(Item={"investigation_id": "inv-why", "farm_id": "wohleb-farm", "field_id": "north-pivot",
+                         "created_at": "2026-07-18T17:00:00Z", "status": "awaiting_reply",
+                         "pending_interrupt_id": "int-1", "explanation_json": json.dumps(expl)})
+    inv.run_request(question_request(question="why do you think that?", about_investigation_id="inv-why"))
+    prompt = model.first_prompt()
+    assert "explain this when the farmer asks why" in prompt and "lowest ground" in prompt
+    assert "Pivot not watering (No ring or wedge shape)" in prompt and "ponding 64%" in prompt
 
 
 def test_internal_ids_are_scrubbed_from_answers():

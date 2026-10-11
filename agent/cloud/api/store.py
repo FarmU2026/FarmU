@@ -195,7 +195,8 @@ def latest_analysis(field_id: str, *, need_overlays: bool = False) -> dict | Non
     return None
 
 
-_KIND_ALIASES = {"truecolor": "true_color", "true_color": "true_color", "health": "health", "mask": "mask"}
+OVERLAY_KINDS = ("true_color", "health", "mask", "departure", "change", "normal")
+_KIND_ALIASES = {"truecolor": "true_color", **{k: k for k in OVERLAY_KINDS}}
 
 
 def overlay_key(row: dict, kind: str) -> str | None:
@@ -204,6 +205,11 @@ def overlay_key(row: dict, kind: str) -> str | None:
     if isinstance(ref, dict):
         return ref.get("key") or ref.get("s3_key")
     return ref if isinstance(ref, str) else None
+
+
+def overlay_kinds(row: dict | None) -> list[str]:
+    """Overlay kinds this analysis has an image for, i.e. the `<kind>.png` names the image route serves."""
+    return [k for k in OVERLAY_KINDS if row and overlay_key(row, k)]
 
 
 def overlay_bounds(row: dict) -> list[float] | None:
@@ -246,6 +252,18 @@ def stats_for(field: dict, row: dict | None) -> dict | None:
 # ---------- farm view (today's GET /api/farms/{id} shape) ----------
 
 
+def _comparison_view(row: dict | None) -> dict:
+    """Additive field keys for the UI: which images exist and the dates/scales to caption them with."""
+    if not row:
+        return {}
+    kinds = overlay_kinds(row)
+    comp = row.get("comparison")
+    out: dict = {"overlay_kinds": kinds, "overlay_date": row.get("date")} if kinds else {}
+    if isinstance(comp, dict) and comp:
+        out["comparison"] = comp
+    return out
+
+
 def ui_field(field: dict, with_stats: bool = True) -> dict:
     out = {
         "id": field["field_id"],
@@ -262,6 +280,9 @@ def ui_field(field: dict, with_stats: bool = True) -> dict:
         if st:
             out["stats"] = st
             out["last_scene_date"] = st.get("scene_date")
+        # Captions must describe the images the image route serves: the newest row that has overlays.
+        has_images = row is not None and overlay_key(row, "true_color")
+        out.update(_comparison_view(row if has_images else latest_analysis(field["field_id"], need_overlays=True)))
     return out
 
 

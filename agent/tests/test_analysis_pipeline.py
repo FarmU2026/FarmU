@@ -80,7 +80,8 @@ def test_ring_problem_end_to_end():
     assert res.anomaly.regions and res.anomaly.regions[0].features.ring_score > 0.5
     assert res.anomaly.delta_since_last is not None  # median change: a 12% ring barely moves it
     assert res.analysis_key == "analysis/north-pivot/2026-07-18/s2/"
-    assert set(w.files) == {res.overlays.true_color.key, res.overlays.health.key, res.overlays.mask.key}
+    kinds = ("true_color", "health", "mask", "departure", "change", "normal")
+    assert set(w.files) == {getattr(res.overlays, k).key for k in kinds}
     assert all(v[:8] == b"\x89PNG\r\n\x1a\n" for v in w.files.values())
     assert res.overlays.health.bounds[0] < -96.54 < res.overlays.health.bounds[2]
 
@@ -184,7 +185,7 @@ def test_scene_analyze_handler_writes_overlays_to_s3(monkeypatch):
         s3 = boto3.client("s3", region_name="us-west-2")
         s3.create_bucket(Bucket="fw-test", CreateBucketConfiguration={"LocationConstraint": "us-west-2"})
         out = scene_analyze.handler(_registry_request())
-        for kind in ("true_color", "health", "mask"):
+        for kind in ("true_color", "health", "mask", "departure", "change", "normal"):
             key = out["overlays"][kind]["key"]
             assert key.startswith("analysis/") and key.endswith(f"/s2/{kind}.png")
             obj = s3.get_object(Bucket="fw-test", Key=key)
@@ -198,7 +199,7 @@ def test_scene_analyze_handler_writes_nothing_without_bucket(monkeypatch):
     puts = []
     monkeypatch.setattr("fieldwatch.analysis.analyzer.NullWriter.put", lambda self, *a, **k: puts.append(a[0]))
     out = scene_analyze.handler(_registry_request())
-    assert out["overlays"]["health"]["key"] and len(puts) == 3  # went to NullWriter, no S3 client was built
+    assert out["overlays"]["health"]["key"] and len(puts) == 6  # went to NullWriter, no S3 client was built
 
 
 def test_registry_path_outside_scene_lambda_is_null_writer(monkeypatch):
