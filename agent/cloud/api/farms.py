@@ -2,6 +2,9 @@
 
     POST /api/farms                                   create farm + people + fields; start context build; scene check
     GET  /api/farms/{farm_id}                         farm + fields (+ stats) + thread (THREAD# items)
+    POST   /api/farms/{farm_id}/fields                add a field {name, crop, polygon}; returns the farm view
+    PATCH  /api/farms/{farm_id}/fields/{field_id}     edit {name?, crop?, polygon?}; field_id never changes
+    DELETE /api/farms/{farm_id}/fields/{field_id}     stop watching the field (history rows are kept)
     POST /api/farms/{farm_id}/check                   invoke the scenes check-latest Lambda for the farm's fields
     POST /api/farms/{farm_id}/fields/{field_id}/ask   StartInvestigation on the bus
     POST /api/farms/{farm_id}/reply                   phone panel reply (mirror reply)
@@ -12,8 +15,10 @@ Handler: cloud.api.farms.handler. No auth, like today's local app (see report: r
 """
 from __future__ import annotations
 
+import math
 import os
 import re
+from typing import get_args
 
 from pydantic import BaseModel, Field
 
@@ -43,6 +48,18 @@ class FarmIn(BaseModel):
 
 class ReplyIn(BaseModel):
     text: str = Field(min_length=1, max_length=480)
+
+
+class FieldAddIn(BaseModel):
+    name: str = Field(max_length=80)
+    crop: str = "corn"
+    polygon: list[list[float]]
+
+
+class FieldPatchIn(BaseModel):
+    name: str | None = Field(default=None, max_length=80)
+    crop: str | None = None
+    polygon: list[list[float]] | None = None
 
 
 def _crop(c: str) -> str:
@@ -126,6 +143,136 @@ def create_farm(req: Request):
         _jobs.scene_check(farm_id, fields, reason="signup")
     except Exception:  # noqa: BLE001
         log.exception("scene check failed for %s", farm_id)
+    return store.farm_view(farm_id)
+
+
+_CROPS = set(get_args(C.Crop))
+
+
+def _valid_crop(c: str | None) -> str:
+    crop = _crop(c or "")
+    if crop not in _CROPS:
+        raise ApiError("INVALID_INPUT", f"crop: must be one of {', '.join(sorted(_CROPS))}")
+    return crop
+
+
+def _valid_name(name: str, others: list[dict]) -> str:
+    name = (name or "").strip()
+    if not name:
+        raise ApiError("INVALID_INPUT", "name: give the field a name")
+    if any(str(f.get("name", "")).strip().lower() == name.lower() for f in others):
+        raise ApiError("INVALID_INPUT", f"name: this farm already has a field called {name!r}")
+    return name
+
+
+def _valid_polygon(polygon: list[list[float]]) -> list[list[float]]:
+    if len(polygon) < 3 or any(len(p) != 2 or not all(math.isfinite(x) for x in p) for p in polygon):
+        raise ApiError("INVALID_INPUT", "polygon: needs at least 3 [lat, lon] points")
+    if any(not (-90 <= lat <= 90 and -180 <= lon <= 180) for lat, lon in polygon):
+        raise ApiError("INVALID_INPUT", "polygon: points must be [lat, lon]")
+    return polygon
+
+
+def _new_field_id(farm_id: str, name: str, taken: set[str]) -> str:
+    base = f"fld_{farm_id.removeprefix('farm_')}_{store.slug(name)}"
+    fid, n = base, 2
+    # Also skip ids of removed fields that still have scene history, so a new field never inherits old images.
+    while fid in taken or store.latest_analysis(fid):
+        fid, n = f"{base}-{n}", n + 1
+    return fid
+
+
+def _write_geometry(fid: str, name: str, polygon_lonlat: list[list[float]]) -> str | None:
+    if not _aws.bucket():
+        return None
+    key = f"fields/{fid}/geometry.geojson"
+    _aws.client("s3").put_object(Bucket=_aws.bucket(), Key=key, ContentType="application/geo+json",
+                                 Body=_aws.dumps({"type": "Feature", "properties": {"field_id": fid, "name": name},
+                                                  "geometry": store.geojson_polygon(polygon_lonlat)}).encode())
+    return key
+
+
+def _setup_field(farm_id: str, field: dict, reason: str) -> None:
+    """The per-field setup sign-up does: context build (soil, history, floods ...) and a scene check."""
+    try:
+        build_id = _jobs.start_context_build(farm_id, [field["field_id"]])
+        if build_id:
+            _aws.table("farms").update_item(Key={"farm_id": farm_id, "item": "FARM"},
+                                            UpdateExpression="SET context_build_id = :b",
+                                            ExpressionAttributeValues={":b": build_id})
+    except Exception:  # noqa: BLE001 - the edit is saved; the build can be restarted
+        log.exception("context build start failed for %s/%s", farm_id, field["field_id"])
+    try:
+        _jobs.scene_check(farm_id, [field], reason=reason)
+    except Exception:  # noqa: BLE001
+        log.exception("scene check failed for %s/%s", farm_id, field["field_id"])
+
+
+@router.route("POST", "/api/farms/{farm_id}/fields")
+def add_field(req: Request):
+    farm_id = req.params["farm_id"]
+    body: FieldAddIn = req.model(FieldAddIn)
+    store.get_farm_item(farm_id)
+    existing = store.list_fields(farm_id)
+    name = _valid_name(body.name, existing)
+    crop = _valid_crop(body.crop)
+    latlon = _valid_polygon(body.polygon)
+    fid = _new_field_id(farm_id, name, {f["field_id"] for f in existing})
+    polygon = [[lon, lat] for lat, lon in latlon]
+    item = {"farm_id": farm_id, "field_id": fid, "name": name, "crop": crop, "crop_current": crop,
+            "acres": store.acres_latlon(latlon), "irrigation": "unknown", "irrigated": None,
+            "polygon": polygon, "status": "building", "created_at": _aws.now_iso()}
+    key = _write_geometry(fid, name, polygon)
+    if key:
+        item["geometry_key"] = key
+    _aws.table("fields").put_item(Item=_aws.to_ddb(item))
+    _setup_field(farm_id, item, "signup")
+    return store.farm_view(farm_id)
+
+
+@router.route("PATCH", "/api/farms/{farm_id}/fields/{field_id}")
+def update_field(req: Request):
+    farm_id, field_id = req.params["farm_id"], req.params["field_id"]
+    body: FieldPatchIn = req.model(FieldPatchIn)
+    store.get_farm_item(farm_id)
+    field = store.get_field(farm_id, field_id)
+    sets: dict = {}
+    if body.name is not None:
+        sets["name"] = _valid_name(body.name, [f for f in store.list_fields(farm_id) if f["field_id"] != field_id])
+    if body.crop is not None:
+        sets["crop"] = sets["crop_current"] = _valid_crop(body.crop)
+    redrawn = body.polygon is not None
+    if redrawn:
+        latlon = _valid_polygon(body.polygon)
+        sets["polygon"] = [[lon, lat] for lat, lon in latlon]
+        sets["acres"] = store.acres_latlon(latlon)
+        sets["status"] = "building"
+    if not sets:
+        raise ApiError("INVALID_INPUT", "send at least one of name, crop, polygon")
+    if redrawn or "name" in sets:
+        key = _write_geometry(field_id, sets.get("name", field.get("name", field_id)),
+                              sets.get("polygon") or field.get("polygon") or [])
+        if key:
+            sets["geometry_key"] = key
+    names = {f"#a{i}": k for i, k in enumerate(sets)}
+    _aws.table("fields").update_item(
+        Key={"farm_id": farm_id, "field_id": field_id},
+        UpdateExpression="SET " + ", ".join(f"#a{i} = :v{i}" for i in range(len(sets))),
+        ExpressionAttributeNames=names,
+        ExpressionAttributeValues={f":v{i}": _aws.to_ddb(v) for i, v in enumerate(sets.values())})
+    if redrawn or ("crop" in sets and sets["crop"] != field.get("crop")):
+        _setup_field(farm_id, {**field, **sets}, "signup")
+    return store.farm_view(farm_id)
+
+
+@router.route("DELETE", "/api/farms/{farm_id}/fields/{field_id}")
+def delete_field(req: Request):
+    farm_id, field_id = req.params["farm_id"], req.params["field_id"]
+    store.get_farm_item(farm_id)
+    store.get_field(farm_id, field_id)
+    # Removing the fw-fields row is what stops the watching: check-latest and the context builder start from it.
+    # Scene analyses, images and context rows are history keyed on field_id and are left in place.
+    _aws.table("fields").delete_item(Key={"farm_id": farm_id, "field_id": field_id})
     return store.farm_view(farm_id)
 
 

@@ -7,6 +7,9 @@ that each group's Router registers exactly these routes.
 ROUTES: dict[str, list[str]] = {
     "farms": [
         "POST /api/farms",
+        "POST /api/farms/{farm_id}/fields",
+        "PATCH /api/farms/{farm_id}/fields/{field_id}",
+        "DELETE /api/farms/{farm_id}/fields/{field_id}",
         "GET /api/farms/{farm_id}",
         "POST /api/farms/{farm_id}/check",
         "POST /api/farms/{farm_id}/fields/{field_id}/ask",
