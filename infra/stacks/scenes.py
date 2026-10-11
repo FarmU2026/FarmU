@@ -76,6 +76,7 @@ class Scenes(Stack):
         data.bus.grant_put_events_to(decide_fn)
 
         # ---------- state machine ----------
+        self.load_fn, self.decide_fn = load_fn, decide_fn  # FieldWatch-Monitoring alarms on them
         self.state_machine = self._state_machine(load_fn, self.analyze_fn, decide_fn)
 
         # ---------- scene filter ----------

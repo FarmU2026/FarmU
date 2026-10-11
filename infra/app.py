@@ -18,6 +18,7 @@ from stacks.context import Context
 from stacks.data_plane import DataPlane
 from stacks.feed import Feed
 from stacks.frontend import Frontend
+from stacks.monitoring import Monitoring
 from stacks.notifications import Notifications
 from stacks.scenes import Scenes
 from stacks.tools import Tools
@@ -35,8 +36,8 @@ scenes = Scenes(app, "FieldWatch-Scenes", data=data, env=env)  # WS2 scene pipel
 context = Context(app, "FieldWatch-Context", data=data, env=env)  # WS15; context.state_machine for the web API
 
 # --- agents and tools ---
-Tools(app, "FieldWatch-Tools", data=data, env=env)  # WS6 Gateway + tool Lambda
-Agent(app, "FieldWatch-Agent", data=data, env=env)  # WS7 session starter (agent itself: AgentCore CLI)
+tools = Tools(app, "FieldWatch-Tools", data=data, env=env)  # WS6 Gateway + tool Lambda
+agent = Agent(app, "FieldWatch-Agent", data=data, env=env)  # WS7 session starter (agent itself: AgentCore CLI)
 
 # --- interaction ---
 notifications = Notifications(app, "FieldWatch-Notifications", data=data, env=env)  # WS9 send + reply
@@ -45,6 +46,10 @@ feed = Feed(app, "FieldWatch-Feed", data=data, env=env)  # WS13 live feed
 api = Api(app, "FieldWatch-Api", data=data, scenes=scenes, context=context, notifications=notifications,
           env=env)  # WS12 web API (HTTP API + Lambdas)
 Frontend(app, "FieldWatch-Frontend", api=api, feed=feed, env=env)  # WS14 web/ on S3 + CloudFront; config.js from api/feed
+
+# --- operations ---
+Monitoring(app, "FieldWatch-Monitoring", scenes=scenes, context=context, agent=agent, notifications=notifications,
+           feed=feed, api=api, tools=tools, env=env)  # DLQ + Lambda error alarms -> SNS fieldwatch-alarms, dashboard
 
 # Still to come: Hazards (WS3, Kurt).
 

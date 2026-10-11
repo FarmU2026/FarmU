@@ -77,7 +77,7 @@ class Feed(Stack):
         farms.grant_write_data(self.projector)
         investigations.grant_read_data(self.projector)
 
-        dlq = sqs.Queue(self, "ProjectorDlq", retention_period=Duration.days(7))
+        self.dlq = dlq = sqs.Queue(self, "ProjectorDlq", retention_period=Duration.days(7))
         events.Rule(
             self, "FeedEvents",
             event_bus=data.bus,
