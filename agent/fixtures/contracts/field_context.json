@@ -39,6 +39,29 @@
   "price_usd_bu": 4.2,
   "price_as_of": "2026-07-17",
   "stage": "R2 (blister)",
+  "disease_reports": [
+    {
+      "disease": "tar spot",
+      "county_fips": "31173",
+      "status": "history",
+      "first_observed": "2021-10-06",
+      "last_observed": "2023-09-21",
+      "source": "EDDMapS (Corn ipmPIPE)"
+    }
+  ],
+  "baseline": {
+    "key": "context/north-pivot/baseline.parquet",
+    "seasons": [
+      2023,
+      2024,
+      2025
+    ],
+    "cohort_field_ids": [
+      "csb-31173-001234",
+      "csb-31173-001240"
+    ],
+    "stub": false
+  },
   "sources": [
     "NRCS Soil Data Access",
     "USGS 3DEP",

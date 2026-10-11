@@ -212,7 +212,13 @@ def test_stage_ownership_is_disjoint_and_matches_contract():
     owned = [a for attrs in OWNED.values() for a in attrs]
     assert len(owned) == len(set(owned))
     flat = set(C.FieldContext.model_fields) - {"schema_version", "field_id", "built_at", "sources"}
-    assert set(owned) - {"disease_reports", "baseline"} == flat  # the two parts the contract lacks (see report)
+    assert set(owned) == flat  # disease_reports and baseline are in the contract now
+
+
+def test_stored_context_validates_against_the_contract():
+    sample = json.loads((Path(__file__).resolve().parents[1] / "fixtures" / "contracts" / "field_context.json").read_text())
+    stub = stages.STAGES["baseline"].compute({"field_id": "north-pivot", "boundary": {}})[0]
+    C.FieldContext.model_validate({**sample, **stub})
 
 
 @pytest.mark.parametrize("name", list(stages.STAGES))

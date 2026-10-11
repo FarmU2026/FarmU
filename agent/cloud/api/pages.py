@@ -19,6 +19,8 @@ from boto3.dynamodb.conditions import Attr
 from pydantic import BaseModel, Field
 
 from fieldwatch import contracts as C
+from fieldwatch import interfaces
+from fieldwatch.interfaces import FieldwatchError
 
 from . import _approvals, _auth, _aws, store
 from ._http import ApiError, Request, Response, Router, json_response
@@ -269,23 +271,13 @@ def work_order_done(req: Request):
     act = _action(action_id)
     if act.get("status") == "done":
         return {"status": "done", "done_at": act.get("done_at")}
-    now = _aws.now_iso()
-    tbl = _aws.table("actions")
+    # The actions lane (WS8) owns the conditional flip to done and emits ActionCompleted exactly once.
     try:
-        tbl.update_item(
-            Key={"action_id": action_id},
-            UpdateExpression="SET #s = :done, done_at = :now" + (", photo_upload_id = :p" if body.photo_upload_id else ""),
-            ConditionExpression="#s <> :done",
-            ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={":done": "done", ":now": now,
-                                       **({":p": body.photo_upload_id} if body.photo_upload_id else {})},
-        )
-    except tbl.meta.client.exceptions.ConditionalCheckFailedException:
-        return {"status": "done"}
-    _aws.put_event("ActionCompleted", C.ActionCompleted(
-        occurred_at=now, action_id=action_id, investigation_id=act.get("investigation_id", ""),
-        completed_by=act.get("assignee_person_id") or "work_order_link"))
-    return {"status": "done", "done_at": now}
+        done = interfaces.actions().mark_done(action_id, act.get("assignee_person_id") or "work_order_link",
+                                              photo_upload_id=body.photo_upload_id)
+    except FieldwatchError as e:
+        raise ApiError(e.code, e.message, e.http_status, e.retryable) from None
+    return {"status": done.status, "done_at": done.done_at}
 
 
 # ---------- onboarding: people ----------

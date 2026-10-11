@@ -1,0 +1,8 @@
+{
+  "schema_version": "1",
+  "occurred_at": "2026-07-18T17:21:05Z",
+  "bucket": "noaa-mrms-pds",
+  "key": "CONUS/MESH_Max_1440min_00.50/20260718/MRMS_MESH_Max_1440min_00.50_20260718-170000.grib2.gz",
+  "product": "MESH_Max_1440min_00.50",
+  "valid_time": "2026-07-18T17:00:00Z"
+}

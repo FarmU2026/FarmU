@@ -14,7 +14,7 @@ from typing import Any
 
 import boto3
 
-from fieldwatch import config
+from fieldwatch import config, interfaces
 from fieldwatch import contracts as C
 
 log = logging.getLogger("fieldwatch.scenes")
@@ -28,8 +28,8 @@ BANDS = ("blue", "green", "red", "rededge1", "nir", "nir08", "swir16", "scl")
 MAX_SCENE_CLOUD = 80.0  # scene filter drops anything cloudier than this
 IDEMPOTENCY_TTL_DAYS = 7
 SCENE_ANALYSIS_TTL_DAYS = 180
-EVENT_SOURCE = "fieldwatch.scenes"
-REPLAY_EVENT_SOURCE = "fieldwatch.replay"
+EVENT_SOURCE = interfaces.Sources.SCENES
+REPLAY_EVENT_SOURCE = interfaces.Sources.REPLAY
 STAC_URL = os.getenv("STAC_URL", "https://earth-search.aws.element84.com/v1")
 MRMS_BUCKET = "noaa-mrms-pds"
 MRMS_DAILY_PRODUCT = "MESH_Max_1440min_00.50"
@@ -223,22 +223,13 @@ def scene_date(scene: dict) -> str:
 # ---------- events ----------
 
 
-def put_events(entries: list[dict]) -> None:
-    """entries: {source, detail_type, detail(dict)}. Raises when EventBridge rejects any entry."""
-    bus = event_bus()
-    for i in range(0, len(entries), 10):
-        batch = entries[i:i + 10]
-        resp = client("events").put_events(Entries=[
-            {"Source": e["source"], "DetailType": e["detail_type"], "Detail": json.dumps(e["detail"]),
-             "EventBusName": bus} for e in batch
-        ])
-        if resp.get("FailedEntryCount"):
-            bad = [r for r in resp["Entries"] if r.get("ErrorCode")]
-            raise RuntimeError(f"PutEvents failed for {len(bad)} entries: {bad[:2]}")
+def emit_all(models: list[C.EventBase], source: str = EVENT_SOURCE) -> int:
+    """Publish contract events through interfaces.publish_events. Raises when EventBridge rejects any."""
+    return interfaces.publish_events(models, source=source, client=client("events"), bus=event_bus())
 
 
 def emit(model: C.EventBase, source: str = EVENT_SOURCE) -> None:
-    put_events([{"source": source, "detail_type": type(model).__name__, "detail": model.model_dump(mode="json")}])
+    emit_all([model], source)
 
 
 # ---------- field records ----------

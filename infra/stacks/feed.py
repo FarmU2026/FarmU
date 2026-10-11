@@ -22,7 +22,7 @@ from .common import python_lambda
 
 DETAIL_TYPES = [
     "SceneAnalyzed", "AnomalyDetected", "WatchOpened", "InvestigationProgress", "InvestigationConcluded",
-    "ReplyReceived", "ApprovalRecorded", "ActionCompleted", "MessageSent", "MessageReceived",
+    "ReplyReceived", "ApprovalRecorded", "ActionCreated", "ActionCompleted", "MessageSent", "MessageReceived",
 ]  # keep in step with agent/cloud/feed/mapping.py EVENT_MODELS (tests/test_feed.py checks)
 NAMESPACE = "fieldwatch"
 API_KEY_NAME = "FeedKey"
@@ -77,7 +77,7 @@ class Feed(Stack):
         farms.grant_write_data(self.projector)
         investigations.grant_read_data(self.projector)
 
-        dlq = sqs.Queue(self, "ProjectorDlq", retention_period=Duration.days(7))
+        self.dlq = dlq = sqs.Queue(self, "ProjectorDlq", retention_period=Duration.days(7))
         events.Rule(
             self, "FeedEvents",
             event_bus=data.bus,
@@ -91,6 +91,7 @@ class Feed(Stack):
                   description="Events HTTP endpoint (publish; also the host in subscribe auth)")
         CfnOutput(self, "FeedRealtimeEndpoint", value=f"wss://{self.api.realtime_dns}/event/realtime",
                   description="Events WebSocket endpoint (subscribe)")
-        CfnOutput(self, "FeedApiKey", value=self.api.api_keys[API_KEY_NAME].attr_api_key,
+        self.api_key = self.api.api_keys[API_KEY_NAME].attr_api_key  # subscribe-only; FieldWatch-Frontend config.js
+        CfnOutput(self, "FeedApiKey", value=self.api_key,
                   description="Subscribe-only API key (hackathon); expires in 365 days")
         CfnOutput(self, "FeedChannelPattern", value="/fieldwatch/farms/{farm_id}/feed | /fieldwatch/farms/{farm_id}/phone")

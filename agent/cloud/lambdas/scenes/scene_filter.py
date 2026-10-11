@@ -1,7 +1,7 @@
 """Scene filter Lambda (docs/implementation-specs.md "Scene filter"; plan T14).
 
-Trigger: SQS `fw-scene-queue` (batch 10, partial batch failures). A message body is one of
-  - a full STAC item (Earth Search new-item message, optionally wrapped in an SNS notification envelope), or
+Trigger: SQS `fw-scene-queue` (batch 10, partial batch failures). A message body is a contracts.SceneQueueMessage:
+  - a full STAC item (Earth Search new-item message or check-latest, optionally wrapped in an SNS envelope), or
   - a replay envelope {replay: true, replay_id, stac_item, field_ids?, as_of?} from the replay Lambda.
 
 Rules, in order: skip collections other than sentinel-2-l2a / sentinel-2-c1-l2a; look the fields up in fw-tile-index by the
@@ -16,23 +16,16 @@ import os
 import re
 from typing import Any
 
+from fieldwatch import contracts as C
+
 from . import common as cm
 from .common import log
 
 
 def parse_body(body: str | dict) -> dict:
-    """Message body -> normalized envelope {replay, replay_id, stac_item, field_ids, as_of}. Raises ValueError."""
-    data = json.loads(body) if isinstance(body, str) else body
-    if isinstance(data, dict) and data.get("Type") == "Notification" and "Message" in data:  # SNS -> SQS envelope
-        data = json.loads(data["Message"])
-    if not isinstance(data, dict):
-        raise ValueError("message is not a JSON object")
-    if data.get("replay") and isinstance(data.get("stac_item"), dict):
-        return {"replay": True, "replay_id": data.get("replay_id"), "stac_item": data["stac_item"],
-                "field_ids": data.get("field_ids"), "as_of": data.get("as_of")}
-    if data.get("type") == "Feature" or "assets" in data:
-        return {"replay": False, "replay_id": None, "stac_item": data, "field_ids": None, "as_of": None}
-    raise ValueError("message is neither a STAC item nor a replay envelope")
+    """Message body -> normalized envelope {replay, replay_id, stac_item, field_ids, as_of}. Raises ValueError.
+    The accepted shapes are defined once, in contracts.SceneQueueMessage."""
+    return C.SceneQueueMessage.parse(body).model_dump()
 
 
 def fields_for_tile(tile_id: str) -> list[dict]:

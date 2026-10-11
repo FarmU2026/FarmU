@@ -59,10 +59,17 @@ def test_every_message_is_a_valid_feed_message_for_the_cloud_backend():
             assert m.payload["event_id"]
 
 
-def test_the_ten_feed_events_are_all_mapped():
+def test_the_feed_events_are_all_mapped():
     assert set(M.DETAIL_TYPES) == {
         "SceneAnalyzed", "AnomalyDetected", "WatchOpened", "InvestigationProgress", "InvestigationConcluded",
-        "ReplyReceived", "ApprovalRecorded", "ActionCompleted", "MessageSent", "MessageReceived"}
+        "ReplyReceived", "ApprovalRecorded", "ActionCreated", "ActionCompleted", "MessageSent", "MessageReceived"}
+
+
+def test_action_created_and_farm_id_shortcut():
+    d = json.loads((Path(__file__).resolve().parents[1] / "fixtures" / "contracts" / "action_created.json").read_text())
+    p = M.project("ActionCreated", d, "evt-1")  # farm_id on the event: no investigation lookup needed
+    assert types(p) == ["action_created"] and p.thread[0].kind == "action"
+    assert p.messages[0].farm_id == d["farm_id"] and "Repair ticket sent to brother" in p.thread[0].text
 
 
 def test_scene_analyzed():

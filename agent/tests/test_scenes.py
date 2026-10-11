@@ -456,8 +456,10 @@ class TestDecide:
         assert len(aws.events.of("AnomalyDetected")) == 1
 
     def test_failed_emit_releases_the_claim_so_the_retry_emits(self, aws):
+        from fieldwatch.interfaces import FieldwatchError
+
         aws.events.fail = True
-        with pytest.raises(RuntimeError):
+        with pytest.raises(FieldwatchError):  # interfaces.publish_event: UPSTREAM_ERROR
             decide.handler(decide_event())
         assert idem_keys() == set()
         aws.events.fail = False
@@ -688,6 +690,13 @@ class TestCheckLatest:
         messages = queued_messages(aws)
         assert {m["id"] for m in messages} == {"scene-MGRS-14TPM", "scene-MGRS-14TNM"}
         assert all(m["type"] == "Feature" and "replay" not in m for m in messages)  # plain items, not replay envelopes
+
+    def test_check_now_request_limits_to_the_fields_tiles(self, aws, monkeypatch):
+        register_field(tile="14TPM")
+        register_field("f2", tile="MGRS-14TNM")
+        monkeypatch.setattr(check_latest, "stac_search", lambda body: [])
+        out = check_latest.handler({"schema_version": "1", "farm_id": "x", "field_ids": ["f2"], "reason": "check_now"})
+        assert out["tiles"] == ["MGRS-14TNM"]
 
     def test_no_tiles_no_calls(self, aws, monkeypatch):
         monkeypatch.setattr(check_latest, "stac_search", lambda b: pytest.fail("should not search"))

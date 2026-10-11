@@ -373,10 +373,19 @@ def test_default_sender_falls_back_to_sms(monkeypatch):
 
 
 def test_default_sender_prefers_notify_send(monkeypatch):
-    import fieldwatch.notify as notify
+    from fieldwatch import interfaces
 
     got = []
-    monkeypatch.setattr(notify, "send", lambda req: got.append(req) or {"status": "sent", "message_id": "m1"}, raising=False)
+
+    class FakeNotify:
+        def send(self, req):
+            got.append(req)
+            return C.SendMessageResult(message_id="m1", status="sent", provider="twilio")
+
+        def reply(self, message):
+            return {}
+
+    interfaces.use_notify(FakeNotify())
     res = actions.default_sender(person_id="brother", phone=None, body="hi", farm_id="f", investigation_id="inv-1",
                                  idempotency_key="k", link={"scope": "work_order", "subject_id": "a", "ttl_hours": 72})
     assert res["ok"] and isinstance(got[0], C.SendMessageRequest) and got[0].person_id == "brother"
@@ -445,8 +454,10 @@ def test_cedar_policy_covers_registry():
     blocks = {m.group(1): m.group(2) for m in re.finditer(r"// ---- policy: (\S+) ----\n(.*?)(?=\n// ---- policy:|\Z)", text, re.S)}
     assert set(blocks) == {"fieldwatch-read-tools", "fieldwatch-write-tools-need-approval", "fieldwatch-messaging-tools"}
     tools_in = {n: set(re.findall(r'\{\{TARGET\}\}___(\w+)"', b)) for n, b in blocks.items()}
+    messaging = {"send_farmer_message", "request_photo"}  # write, but no approval (Cedar messaging policy)
     for spec in TOOLS:
-        home = "fieldwatch-write-tools-need-approval" if spec.access == "write" else "fieldwatch-read-tools"
+        home = ("fieldwatch-messaging-tools" if spec.name in messaging else
+                "fieldwatch-write-tools-need-approval" if spec.access == "write" else "fieldwatch-read-tools")
         assert spec.name in tools_in[home], f"{spec.name} missing from the Cedar {home} policy"
         for other, names in tools_in.items():
             assert other == home or spec.name not in names, f"{spec.name} also in {other}"

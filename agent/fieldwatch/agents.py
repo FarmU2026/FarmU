@@ -457,6 +457,8 @@ class DiagnosisGuard(HookProvider):
         scores = [p for p in map(_json_or_none, _tool_results(messages, "score_hypotheses")) if isinstance(p, dict)]
         impacts = [p for p in map(_json_or_none, _tool_results(messages, "estimate_impact")) if isinstance(p, dict)]
         allowed = {h["percent"] for s in scores for h in s.get("hypotheses", []) if "percent" in h}
+        if not scores:
+            diag.hypotheses = []  # nothing was scored, so there is nothing to copy
         if scores and scores[-1].get("how_sure"):
             diag.how_sure = scores[-1]["how_sure"]
         if impacts and "low_usd" in impacts[-1]:
@@ -480,10 +482,19 @@ For the field you are asked about (call list_fields once to get its id, then use
 4. Call estimate_impact for the most likely condition, using the problem-area acres from the evidence, for a
    dollar range.
 5. Decide one action: a repair work order to the person who does repairs, a scouting pin, or a photo request
-   when the score says close_call or how_sure is "not sure, need a photo". Call that tool. It will pause for the
-   farmer's YES. If the field is genuinely fine, skip the action and say so.
+   when the score says close_call or how_sure is "not sure, need a photo". Propose the action by CALLING its tool
+   (create_work_order, create_scout_pin or request_photo), never by just asking in text: the call is what pauses
+   for the farmer's YES. If the field is genuinely fine, skip the action and say so.
 6. Then produce the diagnosis. Keep "what" and "why" to one short sentence each; the farmer reads this
    as a text message.
+
+Use send_farmer_message only to text someone on the farm directly (for example an urgent heads-up); the
+question for the farmer and your final diagnosis are sent for you. Farmer-facing text is plain ASCII: no em
+dashes, no emoji.
+
+When you fill in the diagnosis, set condition to the top condition from score_hypotheses, affected_acres to
+the acres you gave estimate_impact, and copy hypotheses exactly from the last score_hypotheses result, with probability = percent / 100
+(leave it empty if you never called it).
 
 You never make up how sure we are. Use the how_sure wording from score_hypotheses, and quote a percent only if
 score_hypotheses gave it. Use the dollar range estimate_impact gave you, as given.
@@ -505,7 +516,9 @@ def build_supervisor(
 ) -> Agent:
     """The supervisor with its specialists.
 
-    tools: Gateway tools (workstream 6) to use in place of the local ones, matched by bare tool name.
+    tools: Gateway read tools (workstream 6, `toolset.tools_for(...)`) to use in place of the local ones, matched by
+           bare tool name; any name they lack falls back to the local tool. tools=None is the all-local default.
+           Write tools always stay local (they interrupt for a YES).
     context: optional ContextBundle-like dict with `analysis` (FieldAnalysisResult), `open_watches`, `crop`,
              `stage`, `irrigated`. Without `analysis` the fast path never fires and specialists always run.
     """
@@ -515,12 +528,14 @@ def build_supervisor(
         crop=str(context.get("crop", "other")), stage=context.get("stage"), irrigated=context.get("irrigated"),
     )
     pool = pool_from_tools(tools)
-    write = [pool.get(n) or getattr(T, n) for n in SUPERVISOR_WRITE_TOOLS] if pool else T.WRITE_TOOLS
+    # `tools` replaces READ tools only. The write tools stay local: they pause for the farmer's YES with a Strands
+    # interrupt, which a remote (Gateway) copy cannot do. send_farmer_message needs no approval and is also local.
+    write = [getattr(T, n) for n in SUPERVISOR_WRITE_TOOLS]
     return Agent(
         name="supervisor",
         model=supervisor_model(),
         tools=build_specialists(timeline, ledger, tools) + _pick(SUPERVISOR_READ_TOOLS, pool)
-        + build_scoring_tools(ledger, context) + write,
+        + build_scoring_tools(ledger, context) + write + T.MESSAGE_TOOLS,
         hooks=[timeline, DiagnosisGuard()],
         callback_handler=None,
         session_manager=session_manager,

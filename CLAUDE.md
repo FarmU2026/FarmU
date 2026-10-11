@@ -10,12 +10,14 @@ Strands agents that watch a family farm's fields from satellite, diagnose proble
 
 ## Shape (the plan's full serverless architecture; docs/decisions.md D1)
 - `web/`: static front end (today's Leaflet UI + report and work-order pages) on S3 + CloudFront, calling the API Gateway HTTP API and subscribing to AppSync Events.
-- `agent/fieldwatch/`: agents (`agents.py`), tools (`tools.py`), contracts (`contracts.py`), tool registry (`registry.py`), config (`config.py`), and the domain packages (`analysis/`, `context/`, `hazards/`, `notify/`, scoring, approvals). Pure code, importable from Lambdas.
+- `agent/fieldwatch/`: agents (`agents.py`), tools (`tools.py`), contracts (`contracts.py`), cross-lane seams (`interfaces.py`), tool registry (`registry.py`), config (`config.py`), and the domain packages (`analysis/`, `context/`, `hazards/`, `notify/`, scoring, approvals). Pure code, importable from Lambdas.
 - `agent/cloud/`: Lambda handlers (API, feed projector, pipelines, Gateway tools, notifications) and the AgentCore CLI project (`agentcore/`) for the agent on Runtime.
 - `infra/`: Python CDK app, one stack per subsystem (`FieldWatch-<Subsystem>`), on the shared `FieldWatch-DataPlane`.
 - `agent/web/server.py` (FastAPI) is a local dev harness only: `cd agent; python -m uvicorn web.server:app --port 8000`.
 
 ## Rules
+- To call another lane, import from `fieldwatch.interfaces`; if what you need isn't there, propose it in a separate PR. Never guess another lane's names. It holds the lane Protocols and loaders (`notify()`, `approvals()`, `actions()`, `analysis()`, `toolset()`, `context()`), `FieldwatchError` and its codes, the event registry, table rows, and the names of tables, SSM parameters, env vars, functions and event sources.
+- Every bus event goes through `interfaces.publish_event` (validated against `EVENT_REGISTRY`); a test fails on any other `put_events` call.
 - Build against `contracts.py` and `fixtures/contracts/`. Never change a contract inside a feature change; contract changes are their own small PR.
 - Edit only your workstream's paths (`docs/workstreams.md`). Shared files have owners.
 - New tools go in `registry.py` with a Pydantic `input_model`; keep tool functions free of web-app imports so they run in a Lambda unchanged.

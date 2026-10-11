@@ -1,10 +1,12 @@
 """Read tools (evidence) and write tools (actions).
 
-Read tools return facts from fixtures today; swap the bodies for real APIs
-(Sentinel-2, Open-Meteo, SSURGO) without touching the agents.
+Farm and field facts come from `fieldwatch.farmdata`: the fixture file locally, DynamoDB (fw-farms, fw-fields,
+fw-field-context, fw-scene-analyses) with FIELDWATCH_DATA_BACKEND=dynamo.
 
-Write tools pause the agent with a Strands interrupt until a human says YES.
+Write tools pause the agent with a Strands interrupt until a human says YES. `send_farmer_message` is the one
+write tool without an approval: it texts through the notify lane (interfaces.notify()).
 """
+import hashlib
 import json
 from datetime import date, timedelta
 
@@ -12,7 +14,8 @@ import requests
 from strands import tool
 from strands.types.tools import ToolContext, ToolResult
 
-from . import actions, approvals, config
+from . import actions, approvals, farmdata, interfaces
+from . import contracts as C
 from .contracts import Approval
 
 CROP_DEFAULTS = {  # expected yield (bu/ac) and price ($/bu) when the farmer gave none
@@ -24,9 +27,9 @@ CROP_DEFAULTS = {  # expected yield (bu/ac) and price ($/bu) when the farmer gav
 }
 
 
-def _farm() -> dict:
-    """Read the farm file at call time, so the web UI can point at a different farm per request."""
-    return json.loads(config.FARM_FILE.read_text())
+def _farm(field_id: str | None = None) -> dict:
+    """The current farm, read at call time (fixture file locally, DynamoDB in AWS; see farmdata)."""
+    return farmdata.farm(field_id)
 
 
 def _centroid(f: dict) -> tuple[float, float]:
@@ -40,10 +43,11 @@ def _centroid(f: dict) -> tuple[float, float]:
 
 
 def _field(field_id: str) -> dict:
-    for f in _farm()["fields"]:
+    fields = _farm(field_id)["fields"]
+    for f in fields:
         if f["id"] == field_id or f["name"].lower() == field_id.lower():
             return f
-    raise ValueError(f"unknown field {field_id!r}; known: {[f['id'] for f in _farm()['fields']]}")
+    raise ValueError(f"unknown field {field_id!r}; known: {[f['id'] for f in fields]}")
 
 
 # ---------- read tools: one per specialist ----------
@@ -177,7 +181,7 @@ def _approve(tool_context: ToolContext, action_type: str, summary: str) -> Appro
     inv = _investigation_id(tool_context)
     farmer = _farmer_id()
     aid = approvals.approval_id_for(inv, action_type, summary)
-    a = approvals.create_pending(inv, action_type, summary, farmer, approval_id=aid)
+    a = approvals.create_pending(inv, action_type, summary, farmer, approval_id=aid, farm_id=_farm().get("farm_id"))
     if a.status != "pending":
         return a  # already answered (by the reply handler) or past saying
     answer = tool_context.interrupt(
@@ -255,5 +259,40 @@ def request_photo(field_id: str, where: str, tool_context: ToolContext) -> str:
     return f"Photo request sent with upload link for {f['name']} ({where})."
 
 
+# ---------- messaging: no approval needed (quiet hours and rate limits are the notify lane's job) ----------
+
+
+def deliver_message(*, person_id: str, body: str, investigation_id: str | None = None, link: dict | None = None,
+                    urgency: str = "actionable", idempotency_key: str | None = None,
+                    farm_id: str | None = None) -> C.SendMessageResult:
+    """Text a farm person through the notify lane (interfaces.NotifyAPI.send). The server-set fields of
+    SendMessageRequest are filled here: farm_id from the current farm, idempotency_key from the content.
+    Without a configured notify lane (local runs) the message is mirror-only: nothing leaves the machine."""
+    farm_id = farm_id or farmdata.current_farm_id() or _farm().get("farm_id") or ""
+    body = " ".join(body.split())[:480]
+    key = idempotency_key or f"{investigation_id or 'adhoc'}#msg#{hashlib.sha1(body.encode()).hexdigest()[:12]}"
+    req = C.SendMessageRequest(farm_id=farm_id, person_id=person_id, investigation_id=investigation_id, body=body,
+                               link=link, urgency=urgency, idempotency_key=key)
+    service = interfaces.notify()
+    if service is None:
+        return C.SendMessageResult(message_id="local-" + hashlib.sha1(key.encode()).hexdigest()[:16],
+                                   status="mirror_only", provider="local")
+    return service.send(req)
+
+
+@tool
+def send_farmer_message(person_id: str, body: str, investigation_id: str = "", urgency: str = "actionable") -> dict:
+    """Text a person on the farm (no approval needed). Plain words, under ~300 characters, no emoji, the field
+    name the farmer uses. person_id from the farm's people (the farmer is the default). urgency: low,
+    actionable or urgent (urgent skips quiet hours)."""
+    try:
+        res = deliver_message(person_id=person_id or _farmer_id(), body=body, investigation_id=investigation_id or None,
+                              urgency=urgency if urgency in ("low", "actionable", "urgent") else "actionable")
+    except interfaces.FieldwatchError as e:
+        return {"status": "error", "code": e.code, "message": e.message}
+    return res.model_dump(mode="json")
+
+
 READ_TOOLS = [list_fields, look_at_field, get_scene_analysis, get_weather, get_soil, estimate_loss]
 WRITE_TOOLS = [create_work_order, create_scout_pin, request_photo]
+MESSAGE_TOOLS = [send_farmer_message]

@@ -74,7 +74,12 @@ def test_runtime_role_policy_covers_what_the_agent_does(spec):
             "s3:PutObject", "s3:GetObject", "ssm:GetParameter"} <= actions
     resources = json.dumps(doc)
     assert "table/fw-investigations" in resources and "event-bus/fieldwatch" in resources and "/sessions/*" in resources
-    assert "link-signing-key" not in resources and "table/fw-farms" not in resources  # least privilege
+    assert "link-signing-key" not in resources  # least privilege
+    # farm data (who to text, field facts) is read-only; approvals/actions are written by the local write tools
+    for stmt in doc["Statement"]:
+        if "table/fw-farms" in json.dumps(stmt["Resource"]):
+            assert set(stmt["Action"]) <= {"dynamodb:GetItem", "dynamodb:Query"}, stmt
+    assert "function:fw-notify-send" in resources and "lambda:InvokeFunction" in actions
 
 
 def test_stage_copies_the_real_source_without_duplicating_it(tmp_path):

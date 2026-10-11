@@ -16,7 +16,7 @@ from typing import Any
 import boto3
 from boto3.dynamodb.conditions import Key
 
-from fieldwatch import config
+from fieldwatch import config, interfaces
 
 from ._http import dumps
 
@@ -126,14 +126,13 @@ def query_pk(short: str, pk_name: str, pk: str, **kwargs) -> list[dict]:
 # ---------- EventBridge ----------
 
 
-def put_event(detail_type: str, detail: Any, source: str = "fieldwatch.api") -> None:
-    """detail is a contracts model (validated already) or a dict."""
-    body = detail.model_dump_json() if hasattr(detail, "model_dump_json") else dumps(detail)
-    out = client("events").put_events(Entries=[{
-        "Source": source, "DetailType": detail_type, "Detail": body, "EventBusName": bus(),
-    }])
-    if out.get("FailedEntryCount"):
-        raise RuntimeError(f"put_events failed: {out.get('Entries')}")
+def put_event(detail_type: str, detail: Any, source: str = interfaces.Sources.API) -> None:
+    """Publish a contract event through interfaces.publish_event (validated against EVENT_REGISTRY)."""
+    if not hasattr(detail, "model_dump"):
+        detail = interfaces.event_model(detail_type).model_validate(detail)
+    if type(detail).__name__ != detail_type:
+        raise ValueError(f"detail_type {detail_type} does not match {type(detail).__name__}")
+    interfaces.publish_event(detail, source=source, client=client("events"), bus=bus())
 
 
 # ---------- SSM ----------

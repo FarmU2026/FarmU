@@ -2,7 +2,7 @@
 
     POST /api/farms                                   create farm + people + fields; start context build; scene check
     GET  /api/farms/{farm_id}                         farm + fields (+ stats) + thread (THREAD# items)
-    POST /api/farms/{farm_id}/check                   scene check message on fw-scene-queue
+    POST /api/farms/{farm_id}/check                   invoke the scenes check-latest Lambda for the farm's fields
     POST /api/farms/{farm_id}/fields/{field_id}/ask   StartInvestigation on the bus
     POST /api/farms/{farm_id}/reply                   phone panel reply (mirror reply)
     GET  /api/farms/{farm_id}/fields/{field_id}/{image}   {kind}.png -> 302 presigned S3 URL
@@ -13,11 +13,14 @@ Handler: cloud.api.farms.handler. No auth, like today's local app (see report: r
 from __future__ import annotations
 
 import os
+import re
 
 from pydantic import BaseModel, Field
 
 from fieldwatch import config
 from fieldwatch import contracts as C
+from fieldwatch import interfaces
+from fieldwatch.interfaces import Env
 
 from . import _aws, _jobs, _reply, store
 from ._http import ApiError, Request, Router, log, redirect
@@ -50,33 +53,36 @@ def _crop(c: str) -> str:
 @router.route("POST", "/api/farms")
 def create_farm(req: Request):
     body: FarmIn = req.model(FarmIn)
-    farm_id = store.farm_id_for_phone(body.phone)
-    if len(farm_id) < 10:
+    if len(re.sub(r"\D", "", body.phone)) < 10:
         raise ApiError("INVALID_INPUT", "phone: enter a 10-digit phone number")
     for f in body.fields:
         if len(f.polygon) < 3 or any(len(p) != 2 for p in f.polygon):
             raise ApiError("INVALID_INPUT", f"field {f.name!r} needs at least 3 [lat, lon] points")
 
     now = _aws.now_iso()
-    person_id = f"per_{farm_id}"
     phone = store.e164(body.phone)
+    # Signing up again with the same phone finds the same farm (GSI by-phone); a new phone gets a random id.
+    existing = store.person_by_phone(phone)
+    if existing and existing.get("role") == "owner":
+        farm_id, person_id = existing["farm_id"], existing["person_id"]
+    else:
+        farm_id = store.new_farm_id()
+        person_id = store.owner_person_id(farm_id)
     farms = _aws.table("farms")
-    farms.put_item(Item=_aws.to_ddb({
-        "farm_id": farm_id, "item": "FARM", "name": f"{body.farmer}'s farm", "farmer_name": body.farmer,
-        "phone": phone, "owner_person_id": person_id, "time_zone": "America/Chicago",
-        "quiet_hours": {"start": "21:00", "end": "06:00"}, "muted": False, "created_at": now,
-    }))
-    farms.put_item(Item=_aws.to_ddb({
-        "farm_id": farm_id, "item": f"PERSON#{person_id}", "person_id": person_id, "name": body.farmer,
-        "phone_e164": phone, "role": "owner", "channel_pref": "sms", "opt_in_at": now, "opted_out": False,
-    }))
+    farms.put_item(Item=_aws.to_ddb(interfaces.FarmItem(
+        farm_id=farm_id, name=f"{body.farmer}'s farm", farmer_name=body.farmer, phone=phone,
+        owner_person_id=person_id, timezone="America/Chicago", quiet_hours={"start": "21:00", "end": "06:00"},
+        muted=False, created_at=now).to_item()))
+    farms.put_item(Item=_aws.to_ddb(interfaces.PersonItem(
+        farm_id=farm_id, item=interfaces.person_item_key(person_id), person_id=person_id, name=body.farmer,
+        phone_e164=phone, role="owner", channel_pref="sms", opt_in_at=now, opted_out=False).to_item()))
 
     # Re-signing up with the same phone replaces the field list (as the local app does).
     fields_tbl = _aws.table("fields")
     seen: set[str] = set()
     fields: list[dict] = []
     for f in body.fields:
-        base = f"fld_{farm_id}_{store.slug(f.name)}"
+        base = f"fld_{farm_id.removeprefix('farm_')}_{store.slug(f.name)}"
         fid, n = base, 2
         while fid in seen:
             fid, n = f"{base}-{n}", n + 1
@@ -133,7 +139,11 @@ def check_now(req: Request):
     farm_id = req.params["farm_id"]
     store.get_farm_item(farm_id)
     fields = store.list_fields(farm_id)
-    queued = _jobs.scene_check(farm_id, fields, reason="check_now") is not None
+    try:
+        queued = _jobs.scene_check(farm_id, fields, reason="check_now") is not None
+    except Exception:  # noqa: BLE001 - the button should not 500 because the scenes lane is down
+        log.exception("check-latest invoke failed for %s", farm_id)
+        queued = False
     _aws.table("farms").update_item(Key={"farm_id": farm_id, "item": "FARM"},
                                     UpdateExpression="SET last_checked = :t", ExpressionAttributeValues={":t": _aws.now_iso()})
     return {**store.farm_view(farm_id), "check_queued": queued}
@@ -195,6 +205,8 @@ def status(req: Request):  # noqa: ARG001
         "sms_from": os.getenv("FIELDWATCH_SMS_FROM") or None,
         "model": config.MODEL_ID,
         "backend": "cloud",
-        "scene_queue": bool(os.getenv("FIELDWATCH_SCENE_QUEUE_URL")),
-        "context_workflow": bool(os.getenv("FIELDWATCH_CONTEXT_SM_ARN")),
+        "check_latest": bool(os.getenv(Env.CHECK_FN)),
+        "replay": bool(os.getenv(Env.REPLAY_FN)),
+        "notify": bool(os.getenv(Env.SEND_FN)),
+        "context_workflow": bool(os.getenv(Env.CONTEXT_SM_ARN)),
     }

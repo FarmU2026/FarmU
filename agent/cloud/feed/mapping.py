@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from fieldwatch import contracts as C
+from fieldwatch.interfaces import EVENT_REGISTRY, ThreadItem  # noqa: F401  (ThreadItem re-exported for importers)
 
 NAMESPACE = "fieldwatch"
 FEED = "feed"
@@ -25,19 +26,10 @@ PHONE = "phone"
 # ("message", "step", "concluded" or "action"); the payload then also has `who` and `text`.
 MAX_PAYLOAD_BYTES = 200_000  # AppSync Events limit is 240 KB per event
 
-# detail-type -> contract model (validates the event before it is shown)
-EVENT_MODELS: dict[str, type[C.EventBase]] = {
-    "SceneAnalyzed": C.SceneAnalyzed,
-    "AnomalyDetected": C.AnomalyDetected,
-    "WatchOpened": C.WatchOpened,
-    "InvestigationProgress": C.InvestigationProgress,
-    "InvestigationConcluded": C.InvestigationConcluded,
-    "ReplyReceived": C.ReplyReceived,
-    "ApprovalRecorded": C.ApprovalRecorded,
-    "ActionCompleted": C.ActionCompleted,
-    "MessageSent": C.MessageSent,
-    "MessageReceived": C.MessageReceived,
-}
+# detail-type -> contract model (validates the event before it is shown); models come from interfaces.EVENT_REGISTRY
+SHOWN = ["SceneAnalyzed", "AnomalyDetected", "WatchOpened", "InvestigationProgress", "InvestigationConcluded",
+         "ReplyReceived", "ApprovalRecorded", "ActionCreated", "ActionCompleted", "MessageSent", "MessageReceived"]
+EVENT_MODELS: dict[str, type[C.EventBase]] = {name: EVENT_REGISTRY[name].model for name in SHOWN}
 DETAIL_TYPES = list(EVENT_MODELS)
 
 
@@ -47,30 +39,6 @@ class UnknownFarm(RuntimeError):
 
 def channel(farm_id: str, kind: str) -> str:
     return f"/{NAMESPACE}/farms/{farm_id}/{kind}"
-
-
-@dataclass
-class ThreadItem:
-    """One row of today's phone-panel thread, stored in fw-farms (farm_id, `THREAD#<at>#<id>`).
-    Shape matches agent/web/server.py post(): {who, text, kind, investigation_id, field_id, at}."""
-
-    farm_id: str
-    id: str
-    at: str
-    who: str  # "fieldwatch" | "farmer" | "agent"
-    text: str
-    kind: str  # "message" | "step" | "concluded" | "action"
-    investigation_id: str | None = None
-    field_id: str | None = None
-
-    def to_item(self) -> dict[str, Any]:
-        item = {"farm_id": self.farm_id, "item": f"THREAD#{self.at}#{self.id}", "who": self.who,
-                "text": self.text, "kind": self.kind, "at": self.at}
-        if self.investigation_id:
-            item["investigation_id"] = self.investigation_id
-        if self.field_id:
-            item["field_id"] = self.field_id
-        return item
 
 
 @dataclass
@@ -143,7 +111,8 @@ def project(detail_type: str, detail: dict[str, Any], event_id: str,
         p.messages.append(_msg("investigation_step", ev, farm_id, eid, investigation_id=ev.investigation_id,
                                agent=ev.agent, seq=ev.seq, step=ev.step, text=ev.text, tool=ev.tool,
                                latency_ms=ev.latency_ms, who="agent", kind="step"))
-        p.thread.append(ThreadItem(farm_id, eid, at, "agent", ev.text, "step", ev.investigation_id))
+        p.thread.append(ThreadItem(farm_id=farm_id, id=eid, at=at, who="agent", text=ev.text, kind="step",
+                                   investigation_id=ev.investigation_id))
         if ev.evidence:
             p.messages.append(_msg("evidence_added", ev, farm_id, eid, investigation_id=ev.investigation_id,
                                    agent=ev.agent, seq=ev.seq, evidence=ev.evidence.model_dump()))
@@ -161,8 +130,8 @@ def project(detail_type: str, detail: dict[str, Any], event_id: str,
             impact=ev.impact.model_dump() if ev.impact else None,
             proposed_action=ev.proposed_action.model_dump(), message_id=ev.message_id, fast_path=ev.fast_path,
             who="fieldwatch", kind="concluded", text=ev.summary))
-        p.thread.append(ThreadItem(f.farm_id, eid, at, "fieldwatch", ev.summary, "concluded",
-                                   ev.investigation_id, f.field_id))
+        p.thread.append(ThreadItem(farm_id=f.farm_id, id=eid, at=at, who="fieldwatch", text=ev.summary,
+                                   kind="concluded", investigation_id=ev.investigation_id, field_id=f.field_id))
 
     elif isinstance(ev, C.ReplyReceived):
         # The farmer's text itself reaches the phone as MessageReceived; this only tells the dashboard how
@@ -173,22 +142,37 @@ def project(detail_type: str, detail: dict[str, Any], event_id: str,
                                approval_id=ev.approval_id, person_id=ev.person_id))
 
     elif isinstance(ev, C.ApprovalRecorded):
-        farm_id = lookup(ev.investigation_id)
+        farm_id = ev.farm_id or lookup(ev.investigation_id)
         text = f"{ev.decided_by} {'approved' if ev.decision == 'approved' else 'declined'} the plan."
         p.messages.append(_msg("action_created", ev, farm_id, ev.approval_id, investigation_id=ev.investigation_id,
                                approval_id=ev.approval_id, status=ev.decision, decided_by=ev.decided_by,
                                channel=ev.channel, who="fieldwatch", kind="action", text=text))
-        p.thread.append(ThreadItem(farm_id, f"{ev.approval_id}#approval", at, "fieldwatch", text, "action",
-                                   ev.investigation_id))
+        p.thread.append(ThreadItem(farm_id=farm_id, id=f"{ev.approval_id}#approval", at=at, who="fieldwatch",
+                                   text=text, kind="action", investigation_id=ev.investigation_id))
+
+    elif isinstance(ev, C.ActionCreated):
+        farm_id = ev.farm_id or lookup(ev.investigation_id)
+        what = {"work_order": "Repair ticket", "scout_pin": "Scouting pin", "photo_request": "Photo request",
+                "insurance_notice": "Insurance note draft"}[ev.type]
+        to = f" to {ev.assignee_person_id}" if ev.assignee_person_id and ev.type != "insurance_notice" else ""
+        text = f"{what} sent{to}: {ev.summary}"
+        p.messages.append(_msg("action_created", ev, farm_id, f"{ev.action_id}#created",
+                               investigation_id=ev.investigation_id, action_id=ev.action_id,
+                               approval_id=ev.approval_id, action_type=ev.type, status="sent",
+                               assignee_person_id=ev.assignee_person_id, field_name=ev.field_name,
+                               delivered=ev.delivered, who="fieldwatch", kind="action", text=text))
+        p.thread.append(ThreadItem(farm_id=farm_id, id=f"{ev.action_id}#created", at=at, who="fieldwatch",
+                                   text=text, kind="action", investigation_id=ev.investigation_id))
 
     elif isinstance(ev, C.ActionCompleted):
-        farm_id = lookup(ev.investigation_id)
+        farm_id = ev.farm_id or lookup(ev.investigation_id)
         text = f"{ev.completed_by} finished the job."
         p.messages.append(_msg("action_created", ev, farm_id, ev.action_id, investigation_id=ev.investigation_id,
                                action_id=ev.action_id, status="done", completed_by=ev.completed_by,
+                               photo_upload_id=ev.photo_upload_id,
                                who="fieldwatch", kind="action", text=text))
-        p.thread.append(ThreadItem(farm_id, f"{ev.action_id}#done", at, "fieldwatch", text, "action",
-                                   ev.investigation_id))
+        p.thread.append(ThreadItem(farm_id=farm_id, id=f"{ev.action_id}#done", at=at, who="fieldwatch", text=text,
+                                   kind="action", investigation_id=ev.investigation_id))
 
     elif isinstance(ev, (C.MessageSent, C.MessageReceived)):
         out = isinstance(ev, C.MessageSent)
@@ -197,6 +181,7 @@ def project(detail_type: str, detail: dict[str, Any], event_id: str,
         p.messages.append(_msg("message_out" if out else "message_in", ev, ev.farm_id, ev.message_id,
                                investigation_id=ev.investigation_id, message_id=ev.message_id,
                                person_id=ev.person_id, text=ev.body, who=who, kind="message", **extra))
-        p.thread.append(ThreadItem(ev.farm_id, ev.message_id, at, who, ev.body, "message", ev.investigation_id))
+        p.thread.append(ThreadItem(farm_id=ev.farm_id, id=ev.message_id, at=at, who=who, text=ev.body,
+                                   kind="message", investigation_id=ev.investigation_id))
 
     return p

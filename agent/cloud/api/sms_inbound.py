@@ -1,9 +1,13 @@
 """POST /sms/inbound: Twilio "A message comes in" webhook (application/x-www-form-urlencoded).
 
+When the notify lane is deployed (FIELDWATCH_NOTIFY_REPLY_FN = fw-notify-reply), the original API Gateway event
+is forwarded unchanged to WS9's webhook handler (it verifies the signature, dedupes and answers with TwiML);
+its response is returned as is. Otherwise this module's own minimal path runs:
+
 1. Verify X-Twilio-Signature with the auth token from SSM /fieldwatch/twilio-auth-token. If that
    parameter doesn't exist yet, verification is skipped (logged) so the demo isn't blocked.
 2. Dedupe on MessageSid (fw-idempotency, key "sms-in#<sid>", 7-day TTL).
-3. Hand off to the reply handler (cloud/api/_reply.py -> fieldwatch.notify.inbound.handle).
+3. Hand off to the reply handler (cloud/api/_reply.py fallback).
 4. Answer with empty TwiML; replies go out through the send path, never inline.
 
 The signed URL is the public URL Twilio called. Behind CloudFront or a custom domain, set
@@ -14,7 +18,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import os
+
+from fieldwatch.interfaces import Env, Ssm
 
 from . import _aws, _reply
 from ._http import Request, Response, Router, log
@@ -45,11 +52,26 @@ def public_url(req: Request) -> str:
 
 
 def _param_name() -> str:
-    return os.getenv("FIELDWATCH_TWILIO_TOKEN_PARAM", "/fieldwatch/twilio-auth-token")
+    return os.getenv(Env.TWILIO_TOKEN_PARAM, Ssm.TWILIO_AUTH_TOKEN)
+
+
+def _forward(req: Request, fn: str) -> Response:
+    """Invoke WS9's reply Lambda with the untouched API Gateway event; relay its HTTP response."""
+    out = _aws.client("lambda").invoke(FunctionName=fn, InvocationType="RequestResponse",
+                                       Payload=json.dumps(req.event).encode())
+    body = json.loads(out["Payload"].read() or b"{}")
+    if out.get("FunctionError") or not isinstance(body, dict) or "statusCode" not in body:
+        log.error("notify reply Lambda failed: %s", str(body)[:300])
+        return _twiml()  # Twilio can't do anything useful with a 500
+    return Response(status=int(body["statusCode"]), raw=body.get("body") or "",
+                    headers={str(k): str(v) for k, v in (body.get("headers") or {}).items()})
 
 
 @router.route("POST", "/sms/inbound")
 def inbound(req: Request):
+    fn = os.getenv(Env.NOTIFY_REPLY_FN, "").strip()
+    if fn:
+        return _forward(req, fn)
     form = req.form()
     token = _aws.ssm_param(_param_name(), required=False)
     if token:

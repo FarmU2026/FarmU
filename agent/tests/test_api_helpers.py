@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import ast
 import base64
+import io
 import json
 from pathlib import Path
 from urllib.parse import urlencode
@@ -16,6 +17,7 @@ REPO = Path(__file__).resolve().parents[2]
 REGION = "us-west-2"
 BUCKET = "fw-test-bucket"
 LINK_KEY = "test-link-key-0123456789"
+TEST_FARM_ID = "4025550100"  # a pre-change (phone digit) id: old ids must keep working
 
 
 def data_plane_tables() -> list[tuple]:
@@ -60,11 +62,15 @@ def aws(monkeypatch):
                  "FIELDWATCH_EVENT_BUS": "fieldwatch", "FIELDWATCH_TABLE_PREFIX": "fw-"}.items():
         monkeypatch.setenv(k, v)
     for k in ("AWS_PROFILE", "FIELDWATCH_SCENE_QUEUE_URL", "FIELDWATCH_CONTEXT_SM_ARN", "FIELDWATCH_REPLAY_FN",
-              "FIELDWATCH_RESET_FN", "FIELDWATCH_SEND_FN", "FIELDWATCH_TWILIO_WEBHOOK_URL"):
+              "FIELDWATCH_RESET_FN", "FIELDWATCH_SEND_FN", "FIELDWATCH_TWILIO_WEBHOOK_URL", "FIELDWATCH_CHECK_FN",
+              "FIELDWATCH_MIRROR_FN", "FIELDWATCH_NOTIFY_REPLY_FN"):
         monkeypatch.delenv(k, raising=False)
 
-    from cloud.api import _aws
+    from cloud.api import _aws, store
     from fieldwatch import links
+
+    # Production farm ids are random (interfaces.new_farm_id); the tests pin the first one so FARM is a constant.
+    monkeypatch.setattr(store, "new_farm_id", lambda: TEST_FARM_ID)
 
     with mock_aws():
         _aws.reset_clients()
@@ -86,11 +92,26 @@ def aws(monkeypatch):
 
         monkeypatch.setattr(_aws, "put_event", recording_put)
 
+        # Other lanes' Lambdas (scenes check/replay/reset, notify send/mirror/reply): record invokes, answer from
+        # ns.lambda_responses[function_name] (default {}). moto would need Docker to run real functions.
+        lambda_calls: list[tuple[str, str, dict]] = []
+        lambda_responses: dict[str, dict] = {}
+
+        class FakeLambda:
+            def invoke(self, FunctionName, InvocationType="RequestResponse", Payload=b"{}"):  # noqa: N803
+                lambda_calls.append((FunctionName, InvocationType, json.loads(Payload)))
+                body = json.dumps(lambda_responses.get(FunctionName, {})).encode()
+                return {"StatusCode": 202 if InvocationType == "Event" else 200, "Payload": io.BytesIO(body)}
+
+        real_client = _aws.client
+        monkeypatch.setattr(_aws, "client", lambda service: FakeLambda() if service == "lambda" else real_client(service))
+
         class NS:
             pass
 
         ns = NS()
         ns.s3, ns.sqs, ns.queue_url, ns.events = s3, sqs, queue_url, events
+        ns.lambda_calls, ns.lambda_responses = lambda_calls, lambda_responses
         ns.ddb = boto3.resource("dynamodb", region_name=REGION)
         ns.ssm = boto3.client("ssm", region_name=REGION)
         ns.sfn = boto3.client("stepfunctions", region_name=REGION)

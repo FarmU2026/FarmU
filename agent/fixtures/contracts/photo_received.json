@@ -1,0 +1,21 @@
+{
+  "schema_version": "1",
+  "occurred_at": "2026-07-18T17:21:05Z",
+  "upload_id": "upl_0001",
+  "kind": "photo",
+  "field": {
+    "farm_id": "wohleb-farm",
+    "field_id": "north-pivot"
+  },
+  "investigation_id": "inv-north-pivot-20260718",
+  "s3_key": "uploads/upl_0001/original.jpg",
+  "location": {
+    "lon": -96.54,
+    "lat": 42.16,
+    "accuracy_m": 8.0
+  },
+  "result": {
+    "usable": true,
+    "note": "leaf shows no lesions"
+  }
+}

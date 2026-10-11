@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import json
 from datetime import datetime, timezone
-from urllib.parse import quote, urlencode
+from urllib.parse import urlencode
 
 SCOPES = {'report', 'upload', 'work_order', 'onboard'}
 
@@ -24,9 +24,11 @@ def signed_link(base_url, key, farm_id, link, now):
                   exp=int(now.timestamp() + ttl * 3600))
     payload = _encode(json.dumps(claims, sort_keys=True, separators=(',', ':')).encode())
     signature = _encode(hmac.new(key, payload.encode(), hashlib.sha256).digest())
-    paths = {'report': 'reports', 'work_order': 'work-orders', 'upload': 'uploads', 'onboard': 'onboarding'}
-    return (f"{base_url.rstrip('/')}/{paths[scope]}/{quote(claims['subject_id'], safe='')}?" +
-            urlencode({'t': payload + '.' + signature}))
+    # The front end's pages (web/report.html?inv=..., workorder.html?id=...): fieldwatch.interfaces.LINK_PAGES.
+    from fieldwatch.interfaces import LINK_PAGES
+    page, param = LINK_PAGES[scope]
+    return (f"{base_url.rstrip('/')}/{page}?" +
+            urlencode({param: claims['subject_id'], 't': payload + '.' + signature}))
 
 
 def verify_token(token, key, *, now=None):

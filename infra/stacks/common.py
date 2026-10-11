@@ -26,9 +26,25 @@ from constructs import Construct
 REPO = Path(__file__).resolve().parents[2]
 AGENT = REPO / "agent"
 _COPY = ["fieldwatch", "cloud", "catalog", "fixtures/contracts"]
-_IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc", "tests", "data", "sessions", ".env", "node_modules")
+_IGNORE_NAMES = shutil.ignore_patterns("__pycache__", "*.pyc", "tests", "data", "sessions", ".env", "node_modules",
+                                       ".cli-tools", "cdk.out")
+# Paths (relative to agent/) never copied into a Lambda bundle: the AgentCore CLI project (its own CDK app,
+# node_modules and staged copies of fieldwatch/) is the Runtime's, not a Lambda's.
+_IGNORE_PATHS = {"cloud/agentcore"}
+
+
+def _IGNORE(directory: str, names: list[str]) -> set[str]:  # noqa: N802 - shutil.copytree `ignore` callable
+    ignored = set(_IGNORE_NAMES(directory, names))
+    try:
+        rel = Path(directory).resolve().relative_to(AGENT.resolve()).as_posix()
+    except ValueError:
+        return ignored
+    prefix = "" if rel == "." else rel + "/"
+    return ignored | {n for n in names if prefix + n in _IGNORE_PATHS}
+
+
 _EXCLUDE = ["data", "sessions", "tests", "web", ".venv", "**/__pycache__", "**/*.pyc", ".env",
-            "cloud/agentcore", "**/node_modules"]
+            "cloud/agentcore", "**/node_modules", "**/.cli-tools", "**/cdk.out"]
 # What every handler needs on top of the Lambda runtime's boto3.
 BASE_REQUIREMENTS = ["pydantic>=2", "python-dotenv>=1", "requests>=2.31"]
 

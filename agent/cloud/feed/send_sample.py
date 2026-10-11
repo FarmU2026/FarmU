@@ -60,13 +60,15 @@ def main() -> None:
         boto3.resource("dynamodb", region_name=a.region).Table("fw-investigations").put_item(Item={
             "investigation_id": "inv-north-pivot-20260718", "farm_id": a.farm,
             "field": {"farm_id": a.farm, "field_id": "north-pivot"}, "field_id": "north-pivot"})
+    from fieldwatch import interfaces
+
     events = boto3.client("events", region_name=a.region)
     for detail_type, detail in build(a.farm):
         if a.only and a.only != detail_type:
             continue
-        r = events.put_events(Entries=[{"EventBusName": "fieldwatch", "Source": "fieldwatch.sample",
-                                        "DetailType": detail_type, "Detail": json.dumps(detail)}])
-        print(detail_type, "->", r["Entries"][0].get("EventId") or r["Entries"][0])
+        model = interfaces.event_model(detail_type).model_validate(detail)
+        interfaces.publish_event(model, source=interfaces.Sources.SAMPLE, client=events, bus=interfaces.EVENT_BUS)
+        print(detail_type, "-> sent")
 
 
 if __name__ == "__main__":

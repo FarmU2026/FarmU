@@ -4,6 +4,7 @@ import re
 from pydantic import BaseModel, Field
 
 from . import contracts as C
+from .contracts import ConditionId, Hypothesis
 
 
 # The plan's specialist contract lives in contracts.py (agent, evidence items, notes, tool_calls).
@@ -49,6 +50,14 @@ class Diagnosis(BaseModel):
         description="One of: repair_work_order, scouting_pin, request_photo, insurance_notice, none"
     )
     action_detail: str = Field(description="What the person doing the action should check or do")
+    # --- interfaces repair: what InvestigationConcluded needs. Optional, so older outputs still validate.
+    condition: ConditionId | None = Field(default=None, description="The likely condition id from the catalog")
+    affected_acres: float | None = Field(default=None, description="Acres the dollar range was estimated on")
+    hypotheses: list[Hypothesis] = Field(
+        default_factory=list,
+        description="Copy exactly from the last score_hypotheses result; leave empty if it was not called. "
+                    "Never write your own probabilities.",
+    )
 
     def to_text(self, approved: bool | None = None) -> str:
         """The SMS. Under ~300 chars, five things: what, where, why, stake, what to do.

@@ -1,0 +1,13 @@
+{
+  "schema_version": "1",
+  "replay_id": "rpl_0001",
+  "scene_id": "S2B_14TPM_20260718_0_L2A",
+  "field_ids": [
+    "north-pivot"
+  ],
+  "as_of": null,
+  "farm_id": "wohleb-farm",
+  "delay_s": null,
+  "skip_hail": false,
+  "requested_at": "2026-07-18T17:21:05Z"
+}

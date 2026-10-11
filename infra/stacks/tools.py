@@ -62,6 +62,7 @@ class Tools(Stack):
                 "FIELDWATCH_BUCKET": data.bucket.bucket_name,
                 "FIELDWATCH_TABLE_PREFIX": "fw-",
                 "FIELDWATCH_EVENT_BUS": "fieldwatch",
+                "FIELDWATCH_DATA_BACKEND": "dynamo",  # list_fields / get_soil / estimate_loss read fw- tables, not the fixture
                 "FIELDWATCH_TOOL_TIMEOUT_S": "45",
             },
         )

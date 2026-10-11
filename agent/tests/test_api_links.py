@@ -50,7 +50,21 @@ def test_unknown_scope_rejected():
 
 def test_url():
     assert links.url("https://d.example.net/", "work_order", "act_1", "TOK") == \
-        "https://d.example.net/work-order.html?id=act_1&t=TOK"
+        "https://d.example.net/workorder.html?id=act_1&t=TOK"  # web/workorder.js reads ?id=
+
+
+def test_verify_accepts_tokens_from_the_notify_lane():
+    from datetime import datetime, timezone
+    from urllib.parse import parse_qs, urlparse
+
+    from fieldwatch.notify.links import signed_link
+
+    url = signed_link("https://d.example.net", KEY, "farm_1", {"scope": "report", "subject_id": "inv_1", "ttl_hours": 2},
+                      datetime.now(timezone.utc))
+    q = parse_qs(urlparse(url).query)
+    assert urlparse(url).path == "/report.html" and q["inv"] == ["inv_1"]  # web/report.js reads ?inv=
+    claims = links.verify(q["t"][0], scope="report", subject_id="inv_1", key=KEY)
+    assert claims.farm_id == "farm_1"
 
 
 def test_key_from_ssm(monkeypatch):

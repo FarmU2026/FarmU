@@ -9,6 +9,7 @@ from fieldwatch.contracts import (
     Approval, ApprovalRecorded, InboundMessage, MessageReceived, MessageSent,
     ReplyReceived, SendMessageRequest, SendMessageResult,
 )
+from fieldwatch.interfaces import OPEN_INVESTIGATION_STATUSES  # statuses the agent writes (awaiting_reply, ...)
 from .links import signed_link
 
 UTC = timezone.utc
@@ -200,7 +201,7 @@ class Notifications:
         # No by-person index in the shared data-plane contract; paginated scan until WS7 adds one.
         candidates = [r for r in self.store.scan('investigations') if
             r.get('farm_id') == person['farm_id'] and r.get('person_id', person['person_id']) == person['person_id']
-            and r.get('status') in {'open', 'running', 'waiting', 'waiting_for_farmer'}
+            and r.get('status') in OPEN_INVESTIGATION_STATUSES
             and r.get('created_at') and now - timedelta(days=7) <= parse(r['created_at']) <= now]
         return max(candidates, key=lambda r: r['created_at'], default={}).get('investigation_id')
 

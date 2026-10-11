@@ -227,6 +227,37 @@ def test_resume_concludes_and_seq_keeps_rising():
 
 
 @mock_aws
+def test_question_and_conclusion_are_texted_through_the_notify_lane():
+    from fieldwatch import interfaces
+
+    sent = []
+
+    class FakeNotify:
+        def send(self, req):
+            sent.append(req)
+            return C.SendMessageResult(message_id=f"msg-{len(sent)}", status="sent", provider="twilio")
+
+        def reply(self, message):
+            return {}
+
+    interfaces.use_notify(FakeNotify())
+    table, sqs, url, inv_id = _run()
+    first = inv.run_request(C.StartInvestigation.model_validate(_start_payload()))
+    inv.run_request(C.ResumeInvestigation.model_validate(
+        _resume_payload(interrupt_id=first.interrupt_id, investigation_id=inv_id)))
+    ask, final = [r for r in sent if r.idempotency_key.startswith(inv_id)]
+    assert any(r.idempotency_key.endswith("#text") for r in sent)  # the work order went to the assignee too
+    assert ask.body == first.text and ask.idempotency_key == f"{inv_id}#ask#{first.interrupt_id}"
+    assert final.idempotency_key == f"{inv_id}#concluded" and final.investigation_id == inv_id
+    assert ask.farm_id == "wohleb-farm" and ask.person_id == final.person_id
+    concluded = [C.InvestigationConcluded.model_validate(e["detail"]) for e in _envelopes(sqs, url)
+                 if e["detail-type"] == "InvestigationConcluded"]
+    final_id = f"msg-{sent.index(final) + 1}"
+    assert concluded[0].message_id == final_id
+    assert table.get_item(Key={"investigation_id": inv_id})["Item"]["message_id"] == final_id
+
+
+@mock_aws
 def test_failure_becomes_failed_step_and_keeps_interrupt(monkeypatch):
     table, sqs, url, inv_id = _run()
 

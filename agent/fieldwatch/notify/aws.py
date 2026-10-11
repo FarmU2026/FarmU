@@ -125,10 +125,9 @@ class EventEmitter:
         self.client, self.bus = client, bus
 
     def __call__(self, event):
-        response = self.client.put_events(Entries=[{'EventBusName': self.bus,
-            'Source': 'fieldwatch.notify', 'DetailType': type(event).__name__, 'Detail': event.model_dump_json()}])
-        if response.get('FailedEntryCount', 0):
-            raise RuntimeError('EventBridge rejected notification event')
+        # interfaces.publish_event validates against EVENT_REGISTRY and raises FieldwatchError if rejected.
+        from fieldwatch.interfaces import Sources, publish_event
+        publish_event(event, source=Sources.NOTIFY, client=self.client, bus=self.bus)
 
 
 class Scheduler:
