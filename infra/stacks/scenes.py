@@ -61,7 +61,8 @@ class Scenes(Stack):
         load_fn = python_lambda(self, "LoadInputs", handler=HANDLER + "load_inputs.handler", environment=base_env,
                                 timeout_s=30, memory_mb=256, function_name="fw-scene-load-inputs")
         self.analyze_fn = geo_lambda(self, "AnalyzeField", handler=HANDLER + "analyze.handler", environment=base_env,
-                                     timeout_s=90, memory_mb=3008, function_name="fw-scene-analyze-field")
+                                     timeout_s=90, memory_mb=3008, function_name="fw-scene-analyze-field",
+                                     reserved_concurrency=10)
         decide_fn = python_lambda(self, "Decide", handler=HANDLER + "decide.handler", environment=base_env,
                                   timeout_s=30, memory_mb=256, function_name="fw-scene-decide")
 

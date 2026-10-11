@@ -296,8 +296,18 @@ def _twilio(form, headers=None, b64=False):
     return call(sms_inbound, "POST", "/sms/inbound", form=form, headers=headers, b64=b64)
 
 
-def test_sms_inbound_without_token_param_still_works_and_dedupes(aws):
+def test_sms_inbound_without_token_param_is_rejected_unless_unsigned_is_allowed(aws, monkeypatch):
     signup(farms)
+    monkeypatch.delenv("FIELDWATCH_ALLOW_UNSIGNED_SMS", raising=False)
+    assert _twilio(FORM)[0] == 403 and _twilio(FORM, headers={"X-Twilio-Signature": "anything"})[0] == 403
+    assert aws.events == []
+    monkeypatch.setenv("FIELDWATCH_ALLOW_UNSIGNED_SMS", "true")  # only the exact value 1 counts
+    assert _twilio(FORM)[0] == 403 and aws.events == []
+
+
+def test_sms_inbound_unsigned_dev_mode_still_works_and_dedupes(aws, monkeypatch):
+    signup(farms)
+    monkeypatch.setenv("FIELDWATCH_ALLOW_UNSIGNED_SMS", "1")
     code, body, headers = _twilio(FORM, b64=True)
     assert code == 200 and headers["Content-Type"] == "text/xml" and "<Response>" in body
     assert [e[0] for e in aws.events] == ["MessageReceived", "ReplyReceived"]
@@ -305,12 +315,15 @@ def test_sms_inbound_without_token_param_still_works_and_dedupes(aws):
     assert len(aws.events) == 2
 
 
-def test_sms_inbound_signature(aws):
+def test_sms_inbound_signature(aws, monkeypatch):
+    monkeypatch.setenv("FIELDWATCH_ALLOW_UNSIGNED_SMS", "1")  # a configured token still wins: dev mode never bypasses it
     signup(farms)
     aws.ssm.put_parameter(Name="/fieldwatch/twilio-auth-token", Value="tw-secret", Type="SecureString")
     url = "https://abc123.execute-api.us-west-2.amazonaws.com/sms/inbound"
     good = sms_inbound.twilio_signature("tw-secret", url, FORM)
     assert _twilio(FORM, headers={"X-Twilio-Signature": "bad"})[0] == 403
+    assert _twilio(FORM)[0] == 403  # no signature header at all
+    assert _twilio(FORM, headers={"X-Twilio-Signature": "bäd"})[0] == 403  # non-ASCII must not 500
     assert aws.events == []
     assert _twilio(FORM, headers={"X-Twilio-Signature": good})[0] == 200
     assert [e[0] for e in aws.events] == ["MessageReceived", "ReplyReceived"]
@@ -324,7 +337,8 @@ def test_twilio_signature_known_vector():
     assert sig == "0/KCTR6DLpKmkAf8muzZqo1nDgQ="
 
 
-def test_sms_inbound_unknown_number(aws):
+def test_sms_inbound_unknown_number(aws, monkeypatch):
+    monkeypatch.setenv("FIELDWATCH_ALLOW_UNSIGNED_SMS", "1")
     code, _, _ = _twilio({**FORM, "From": "+19995550000"})
     assert code == 200 and aws.events == []
 

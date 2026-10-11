@@ -48,6 +48,7 @@ class Agent(Stack):
             handler="cloud.lambdas.session_starter.handler.handler",
             timeout_s=60,  # the Runtime may cold-start (~11 s) before it acknowledges
             memory_mb=256,
+            reserved_concurrency=5,  # each invocation starts a Bedrock-backed investigation: cap the cost
             environment={
                 "FIELDWATCH_RUNTIME_ARN_PARAM": RUNTIME_ARN_PARAM,
                 "FIELDWATCH_INVESTIGATIONS_TABLE": "fw-investigations",  # fixed name (data_plane.py)

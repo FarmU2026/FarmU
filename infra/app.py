@@ -34,7 +34,7 @@ Access(app, "FieldWatch-Access", data=data, env=env)
 
 # --- pipelines ---
 scenes = Scenes(app, "FieldWatch-Scenes", data=data, env=env)  # WS2 scene pipeline + replay
-Hazards(app, "FieldWatch-Hazards", data=data, env=env)  # WS3 hail and drought
+hazards = Hazards(app, "FieldWatch-Hazards", data=data, env=env)  # WS3 hail and drought
 context = Context(app, "FieldWatch-Context", data=data, env=env)  # WS15; context.state_machine for the web API
 
 # --- agents and tools ---
@@ -51,6 +51,6 @@ Frontend(app, "FieldWatch-Frontend", api=api, feed=feed, env=env)  # WS14 web/ o
 
 # --- operations ---
 Monitoring(app, "FieldWatch-Monitoring", scenes=scenes, context=context, agent=agent, notifications=notifications,
-           feed=feed, api=api, tools=tools, env=env)  # DLQ + Lambda error alarms -> SNS fieldwatch-alarms, dashboard
+           feed=feed, api=api, tools=tools, hazards=hazards, env=env)  # DLQ + Lambda error alarms -> SNS fieldwatch-alarms, dashboard
 
 app.synth()

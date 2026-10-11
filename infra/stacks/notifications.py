@@ -56,6 +56,7 @@ class Notifications(Stack):
             functions[name] = python_lambda(self, name.title(), function_name='fw-notify-' + name,
                 handler='cloud.lambdas.notify.' + handler, role=role, environment=environment,
                 requirements=['tzdata>=2024'], memory_mb=256, timeout_s=30,
+                reserved_concurrency=5 if name == 'send' else None,  # cost cap: send texts via Twilio
                 tracing=lambda_.Tracing.ACTIVE, dead_letter_queue=self.dlq, retry_attempts=2)
             for table in ('messages', 'idempotency', 'approvals'):
                 data.tables['fw-' + table].grant_read_write_data(role)

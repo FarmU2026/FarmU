@@ -34,6 +34,19 @@ from stacks.common import AGENT, python_lambda
 
 BOUNDARY_NAME = "fieldwatch-boundary"
 
+# Stage throttling (requests/second, burst), a cost guardrail: every unthrottled route is a way to burn Lambda,
+# Bedrock and Step Functions money. Route keys must match agent/cloud/api/routes.py exactly (a setting for an
+# unknown key fails the deploy). The legacy /api/... routes stay unauthenticated (the ported UI calls them without
+# a token), so rate limits are their only guard.
+DEFAULT_THROTTLE = (25, 50)
+ROUTE_THROTTLES: dict[str, tuple[int, int]] = {
+    "POST /v1/replay": (1, 2),
+    "POST /v1/replay/reset": (1, 2),
+    "POST /api/farms": (2, 5),
+    "POST /api/farms/{farm_id}/check": (2, 5),
+    "POST /api/farms/{farm_id}/fields/{field_id}/ask": (2, 5),
+}
+
 
 def _load_routes() -> tuple[dict[str, list[str]], dict[str, str]]:
     spec = importlib.util.spec_from_file_location("fieldwatch_api_routes", AGENT / "cloud" / "api" / "routes.py")
@@ -107,7 +120,8 @@ class Api(Stack):
         for group, keys in routes.items():
             cid = "".join(p.capitalize() for p in group.split("_")) + "Fn"
             fn = python_lambda(self, cid, handler=handlers[group], environment=env,
-                               timeout_s=15 if group == "sms_inbound" else 30, memory_mb=512)
+                               timeout_s=15 if group == "sms_inbound" else 30, memory_mb=512,
+                               reserved_concurrency=10)
             self.functions[group] = fn
             integration = HttpLambdaIntegration(f"{cid}Integration", fn)
             for key in keys:
@@ -146,6 +160,16 @@ class Api(Stack):
                         arn_format=ArnFormat.COLON_RESOURCE_NAME))
             if arns:
                 fn.add_to_role_policy(iam.PolicyStatement(actions=["lambda:InvokeFunction"], resources=arns))
+
+        known = {k for keys in routes.values() for k in keys}
+        assert set(ROUTE_THROTTLES) <= known, f"throttle for unknown routes: {set(ROUTE_THROTTLES) - known}"
+        stage = self.http_api.default_stage.node.default_child  # L1 CfnStage: the L2 has no throttle settings
+        stage.default_route_settings = apigw.CfnStage.RouteSettingsProperty(
+            throttling_rate_limit=DEFAULT_THROTTLE[0], throttling_burst_limit=DEFAULT_THROTTLE[1])
+        # route_settings is an untyped map in the L1, so values are raw CloudFormation (PascalCase) dicts
+        stage.route_settings = {
+            key: {"ThrottlingRateLimit": rate, "ThrottlingBurstLimit": burst}
+            for key, (rate, burst) in ROUTE_THROTTLES.items()}
 
         CfnOutput(self, "ApiUrl", value=self.http_api.api_endpoint, description="Base URL of the FieldWatch web API")
         CfnOutput(self, "SmsWebhookUrl", value=f"{self.http_api.api_endpoint}/sms/inbound",

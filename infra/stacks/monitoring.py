@@ -1,9 +1,10 @@
 """FieldWatch-Monitoring: alarms and one dashboard across the subsystem stacks.
 
 Alarms (all notify the SNS topic `fieldwatch-alarms`, created with NO subscription):
-  - every FieldWatch dead-letter queue: ApproximateNumberOfMessagesVisible > 0 (something failed for good)
+  - every FieldWatch dead-letter queue (scenes, session starter, notifications, projector, hail): ApproximateNumberOfMessagesVisible > 0 (something failed for good)
   - Lambda Errors > 0 in 5 minutes for the main functions (scene filter/decide/replay/reset/check-latest,
-    session starter, projector, notify send/reply/mirror, Gateway tools, every API route group)
+    session starter, projector, hail filter, drought poller, notify send/reply/mirror, Gateway tools, every
+    API route group)
   - Step Functions ExecutionsFailed > 0 (scene analysis, context builder)
   - API Gateway 5xx > 5 in 5 minutes
 Dashboard `FieldWatch`: Lambda errors and duration, Step Functions failures, API requests and 5xx.
@@ -25,7 +26,7 @@ PERIOD = Duration.minutes(5)
 
 class Monitoring(Stack):
     def __init__(self, scope: Construct, construct_id: str, *, scenes=None, context=None, agent=None,
-                 notifications=None, feed=None, api=None, tools=None, **kwargs) -> None:
+                 notifications=None, feed=None, api=None, tools=None, hazards=None, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
         Tags.of(self).add("project", "fieldwatch")
 
@@ -47,6 +48,7 @@ class Monitoring(Stack):
             "StarterDlq": getattr(agent, "dlq", None),
             "NotifyDlq": getattr(notifications, "dlq", None),
             "ProjectorDlq": getattr(feed, "dlq", None),
+            "HailDlq": getattr(hazards, "dlq", None),
         }
         for name, q in dlqs.items():
             if q is not None:
@@ -67,6 +69,8 @@ class Monitoring(Stack):
         if notifications is not None:
             functions.update({"NotifySend": notifications.send, "NotifyReply": notifications.reply,
                               "NotifyMirror": notifications.mirror})
+        if hazards is not None:
+            functions.update({"HailFilter": hazards.hail_filter, "DroughtPoller": hazards.drought_poller})
         if tools is not None:
             functions["GatewayTools"] = tools.function
         if api is not None:
