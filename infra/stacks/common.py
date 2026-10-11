@@ -79,7 +79,10 @@ def python_lambda(scope: Construct, cid: str, *, handler: str, requirements: lis
         bundling=BundlingOptions(
             image=DockerImage.from_registry("public.ecr.aws/sam/build-python3.12:latest"),
             local=_LocalPip(reqs),
-            command=["bash", "-c", "echo local bundling only && exit 1"],
+            # Never run (local bundling always succeeds), but it is part of CDK's bundle cache key. Every zip
+            # Lambda bundles the same agent/ folder and the local bundler's requirements aren't in that key, so
+            # without them here the first bundle built is reused for all and extras (e.g. shapely) go missing.
+            command=["bash", "-c", f"echo local bundling only: {' '.join(sorted(reqs))} && exit 1"],
         ),
     )
     return lambda_.Function(
