@@ -84,6 +84,11 @@ def verify(number: int, head_sha: str) -> tuple[bool, str]:
     if merge.returncode != 0:
         sh("git", "merge", "--abort", check=False)
         return False, "conflict"
+    # The job installed main's requirements; pick up anything the PR adds (e.g. a new library).
+    deps = sh(PY, "-m", "pip", "install", "-q", "-r", "agent/requirements-dev.txt", "-r", "infra/requirements.txt",
+              check=False)
+    if deps.returncode != 0:
+        return False, "dependency install failed:\n```\n" + (deps.stdout + deps.stderr)[-3000:] + "\n```"
     tests = sh(PY, "-m", "pytest", "tests", "-q", "-m", "not live", "-p", "no:cacheprovider", cwd="agent", check=False)
     if tests.returncode != 0:
         return False, "tests failed:\n```\n" + (tests.stdout + tests.stderr)[-3000:] + "\n```"
