@@ -77,7 +77,7 @@
     if (a.status === "declined") return block("warn", "Declined" + (a.decided_by ? " by " + a.decided_by : "") + ".", "Nothing will be sent. We will keep watching the field.");
     if (a.status === "expired") return block("warn", "This request has expired.", "We will keep watching and text you if the field needs a decision.");
     return `<div class="block"><h2>${esc(a.label)}?</h2>
-      <div class="btn-row two"><button id="approve">Approve</button><button id="decline" class="secondary">Decline</button></div>
+      <div class="btn-row two"><button class="btn primary" id="approve">Approve</button><button class="btn secondary" id="decline">Decline</button></div>
       <p class="small" id="decisionMsg" role="status"></p></div>`;
   }
 

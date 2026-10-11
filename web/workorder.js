@@ -40,7 +40,7 @@
 
   function doneHtml(status) {
     if (status === "done") return banner("ok", "Marked done. Thank you.", "FieldWatch has told the family.");
-    return `<div class="btn-row"><button id="done">Mark done</button></div><p class="small" id="doneMsg" role="status"></p>`;
+    return `<div class="btn-row"><button class="btn primary" id="done">Mark done</button></div><p class="small" id="doneMsg" role="status"></p>`;
   }
 
   function drawMap(pin) {

@@ -67,6 +67,8 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         return self._proxy()
 
+    do_PATCH = do_DELETE = do_PUT = do_POST
+
 
 if __name__ == "__main__":
     print(f"web/ on http://localhost:{PORT}  (proxying /api to localhost:{HARNESS})")
