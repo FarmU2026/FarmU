@@ -112,7 +112,7 @@ def test_interrupt_then_resume_produces_diagnosis():
 
     assert step2.status == "done", step2
     assert step2.diagnosis is not None
-    assert step2.diagnosis.dollars_high == 14000
+    assert step2.diagnosis.dollars_high == 0  # no impact estimate ran: guard clears the dollars
     assert step2.text.startswith("north pivot:") and "Repair ticket sent." in step2.text
     assert len(step2.text) < 320
     sent = [e for e in events if e["kind"] == "tool_end" and e["tool"] == "create_work_order"]

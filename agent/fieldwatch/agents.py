@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import threading
+import typing
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -27,7 +28,7 @@ from strands import Agent, tool
 from strands.hooks import AfterInvocationEvent, HookProvider, HookRegistry
 from strands.models import BedrockModel, Model
 
-from . import config
+from . import config, scoring
 from . import contracts as C
 from . import registry
 from . import tools as T
@@ -46,7 +47,11 @@ PLAIN_WORDS = (
     "score. Say 'crop health', 'problem area', 'how sure we are'. Use the field name the farmer uses."
 )
 
-FAST_PATH_THRESHOLD = float(os.getenv("FIELDWATCH_FAST_PATH_THRESHOLD", "0.9"))  # implementation-specs "Investigation lifecycle"
+# Scorer runs (corn, R2, irrigated unknown..true): strong ring + normal rain scores 0.80-0.94, ring alone 0.73-0.92
+# (0.73-0.77 only when irrigation and stage are unknown); single weaker patterns top out at 0.77 (wedge), 0.75 (sandy),
+# 0.70 (hail overlap), 0.69 (low spots), 0.60 (weak ring). 0.8 fires on a strong ring with context and on no single
+# weak pattern without rain context. Env override kept.
+FAST_PATH_THRESHOLD = float(os.getenv("FIELDWATCH_FAST_PATH_THRESHOLD", "0.8"))  # implementation-specs "Investigation lifecycle"
 CLOSE_CALL = 0.15  # top two hypotheses this close and unresolved: a photo may help
 SPECIALIST_LIMITS = {"turns": 8}  # specs: 8 tool calls per specialist
 SUPERVISOR_MODEL_ID = os.getenv("FIELDWATCH_SUPERVISOR_MODEL", "")  # D4: Sonnet for the demo; empty = config.MODEL_ID
@@ -111,12 +116,27 @@ GROWTH_STAGE_HINT = "Use the growth stage in your reasons only when a tool gave 
 PATTERN_RULES: list[tuple[str, float, C.ConditionId, str, str]] = [
     ("ring_score", 0.6, "pivot_failure", "ring_pattern_strong",
      "The weak area is a ring on the outer edge, the path of the pivot's last span."),
+    ("ring_score", 0.3, "pivot_failure", "ring_pattern_weak", "The weak area is partly a ring on the outer edge."),
     ("lowspot_overlap", 0.5, "ponding", "lowspot_overlap_high", "The weak area sits in the low spots of the field."),
     ("sandy_soil_overlap", 0.5, "sandy_soil_water_stress", "sandy_soil_overlap_high",
      "The weak area sits on sandy soil."),
     ("hail_swath_overlap", 0.5, "hail", "hail_swath_overlap_high",
      "The weak area lines up with where hail fell."),
+    ("wedge_score", 0.6, "pivot_failure", "wedge_pattern_strong",
+     "The weak area is one slice of the circle, the way a failed sprinkler section looks."),
+    ("edge_band_score", 0.6, "herbicide_drift", "edge_pattern_strong",
+     "The weak area runs along one edge of the field."),
+    ("stripe_score", 0.6, "planter_skip", "stripe_pattern_strong", "The weak area is straight parallel bands."),
 ]
+# Features that are clearly absent refute the condition they would point to:
+# (feature, below, hypothesis, weight_key, reason)
+ABSENCE_RULES: list[tuple[str, float, C.ConditionId, str, str]] = [
+    ("lowspot_overlap", 0.15, "ponding", "lowspot_overlap_none", "The weak area is not in the low spots."),
+    ("sandy_soil_overlap", 0.15, "sandy_soil_water_stress", "soil_not_sandy", "The weak area is not on sandy soil."),
+    ("stripe_score", 0.2, "planter_skip", "stripe_pattern_none", "There are no straight planter bands."),
+    ("edge_band_score", 0.25, "herbicide_drift", "edge_pattern_none", "The weak area is not along a field edge."),
+]
+UNIFORM_SHARE = 0.7  # the weak area covers this share of the field: stress is field-wide
 
 
 def model() -> Model:
@@ -171,31 +191,72 @@ class EvidenceLedger:
         return added
 
 
-def evidence_from_analysis(
-    analysis: C.FieldAnalysisResult | dict, open_watches: list[dict] | None = None, *, start: int = 1
-) -> list[C.EvidenceItem]:
-    """Turn a field analysis (pattern features, open hail watch) into evidence items, deterministically.
-
-    Uses the strongest anomaly region. This is the "precomputed evidence" the fast path scores before any specialist runs.
-    """
+def top_region(analysis: C.FieldAnalysisResult | dict) -> C.AnomalyRegion | None:
+    """The strongest anomaly region of a usable analysis, or None."""
     if isinstance(analysis, dict):
         analysis = C.FieldAnalysisResult.model_validate(analysis)
+    regions = analysis.anomaly.regions if analysis.status == "ok" and analysis.anomaly else []
+    return max(regions, key=lambda r: r.score) if regions else None
+
+
+def evidence_from_analysis(
+    analysis: C.FieldAnalysisResult | dict, open_watches: list[dict] | None = None, *, start: int = 1,
+    weather: dict | None = None, field_acres: float | None = None,
+) -> list[C.EvidenceItem]:
+    """Turn a field analysis (pattern features, hail watches, 30-day rain, region size) into evidence, deterministically.
+
+    Uses the strongest anomaly region. This is the "precomputed evidence" the fast path scores before any specialist runs.
+    open_watches: None means hail was not checked; a list (even empty) means it was, so no hail watch is evidence of
+    no hail. weather: optional {rain_in, normal_rain_in}; field_acres: optional field size for the field-wide check.
+    """
+    top = top_region(analysis)
     items: list[C.EvidenceItem] = []
-    regions = analysis.anomaly.regions if analysis.anomaly else []
-    if analysis.status == "ok" and regions:
-        top = max(regions, key=lambda r: r.score)
+
+    def add(hyp, direction, key, source, value, reason):
+        items.append(C.EvidenceItem(
+            evidence_id=f"pre-{start + len(items)}", hypothesis=hyp, direction=direction, weight_key=key,
+            source=source, value=value, reason=reason, created_at=_now()))
+
+    if top is not None:
         for feat, minimum, hyp, key, reason in PATTERN_RULES:
             value = getattr(top.features, feat)
-            if value is not None and value >= minimum:
-                items.append(C.EvidenceItem(
-                    evidence_id=f"pre-{start + len(items)}", hypothesis=hyp, direction="supports", weight_key=key,
-                    source="analyze_field", value={feat: value}, reason=reason, created_at=_now()))
-    for w in open_watches or []:
-        if w.get("type") == "hail":
-            items.append(C.EvidenceItem(
-                evidence_id=f"pre-{start + len(items)}", hypothesis="hail", direction="supports",
-                weight_key="hail_swath_overlap_high", source="get_hail", value=w.get("detail", {}),
-                reason="Radar showed hail over this field recently.", created_at=_now()))
+            if value is None or value < minimum:
+                continue
+            if key == "ring_pattern_weak" and value >= 0.6:
+                continue  # a strong ring is not also a weak one
+            add(hyp, "supports", key, "analyze_field", {feat: value}, reason)
+        for feat, below, hyp, key, reason in ABSENCE_RULES:
+            value = getattr(top.features, feat)
+            if value is not None and value < below:
+                add(hyp, "refutes", key, "analyze_field", {feat: value}, reason)
+        overlap = top.features.hail_swath_overlap
+        if overlap is not None and overlap < 0.1:
+            add("hail", "refutes", "hail_swath_no_overlap", "analyze_field", {"hail_swath_overlap": overlap},
+                "The weak area is outside where hail fell.")
+        if field_acres and field_acres > 0 and top.area_acres / field_acres >= UNIFORM_SHARE:
+            share = round(top.area_acres / field_acres, 2)
+            for hyp in ("drought", "pivot_failure"):
+                add(hyp, "supports", "stress_uniform_field", "analyze_field", {"share_of_field": share},
+                    "The weak area covers most of the field.")
+    hail_watches = [w for w in open_watches or [] if w.get("type") == "hail"]
+    for w in hail_watches:
+        add("hail", "supports", "hail_swath_overlap_high", "get_hail", w.get("detail", {}),
+            "Radar showed hail over this field recently.")
+    if open_watches is not None and not hail_watches and top is not None:
+        add("hail", "refutes", "no_hail_mesh", "get_hail", {"open_hail_watches": 0},
+            "No hail was seen over this field.")
+    w30 = weather or {}
+    rain, normal = w30.get("rain_in"), w30.get("normal_rain_in") or w30.get("normal_rain_in_30d")
+    if top is not None and rain is not None and normal:
+        ratio = rain / normal
+        val = {"rain_in": rain, "normal_rain_in": normal}
+        if 0.7 <= ratio <= 1.3:
+            add("pivot_failure", "supports", "rain_normal_30d", "get_weather", val, "Rain was about normal.")
+            add("drought", "refutes", "rain_normal_30d", "get_weather", val, "Rain was about normal.")
+            add("sandy_soil_water_stress", "refutes", "rain_normal_30d", "get_weather", val, "Rain was about normal.")
+        elif ratio < 0.6:
+            for hyp in ("drought", "pivot_failure", "sandy_soil_water_stress"):
+                add(hyp, "supports", "rain_deficit_30d", "get_weather", val, "Rain was well below normal.")
     return items
 
 
@@ -378,15 +439,20 @@ def build_scoring_tools(ledger: EvidenceLedger, context: dict | None = None) -> 
         items: list[C.EvidenceItem] = []
         if analysis is not None:
             try:
-                items = evidence_from_analysis(analysis, context.get("open_watches"))
+                items = evidence_from_analysis(
+                    analysis, context.get("open_watches"), weather=context.get("weather"),
+                    field_acres=context.get("field_acres"))
             except ValidationError as exc:
                 return json.dumps({"fast_path": False, "note": f"precomputed analysis unusable: {exc.error_count()} errors"})
         if not items:
             return json.dumps({"fast_path": False, "note": "no precomputed evidence; ask the specialists"})
         ledger.add(items)
         payload = score_payload(score_ledger(ledger))
-        top = max((h.probability for h in ledger.score.hypotheses), default=0.0)
-        ledger.fast_path = top >= FAST_PATH_THRESHOLD
+        probs = sorted((h.probability for h in ledger.score.hypotheses), reverse=True) + [0.0, 0.0]
+        # decisive: high enough, the runner-up is not a close call, and no rival is itself "likely" (an open hail
+        # watch next to a ring, say, needs the specialists)
+        ledger.fast_path = (probs[0] >= FAST_PATH_THRESHOLD and probs[0] - probs[1] >= CLOSE_CALL
+                            and probs[1] <= scoring.LIKELY_ABOVE)
         return json.dumps({**payload, "fast_path": ledger.fast_path})
 
     @tool
@@ -403,13 +469,21 @@ def build_scoring_tools(ledger: EvidenceLedger, context: dict | None = None) -> 
         return json.dumps({**score_payload(score_ledger(ledger)), "evidence_count": len(ledger.evidence)})
 
     @tool
-    def estimate_impact(field_id: str, condition: str, affected_acres: float, severity: str = "medium",
+    def estimate_impact(field_id: str, condition: str, affected_acres: float = 0.0, severity: str = "medium",
                         days_until_fixed: int = 7, stage: str = "", crop: str = "",
                         expected_yield: float | None = None, price: float | None = None) -> str:
         """Dollar range at stake for the likely condition on the affected acres, from published loss tables.
         condition is a condition id from the score result. Pass crop, expected_yield and price from the field
         when you know them. Use these dollar figures as given."""
-        req = C.ImpactRequest(field_id=field_id, condition=condition, affected_acres=affected_acres,
+        acres = affected_acres
+        if context.get("analysis") is not None:  # acres are the top region's area, never the model's guess
+            try:
+                region = top_region(context["analysis"])
+            except ValidationError:
+                region = None
+            if region is not None:
+                acres = region.area_acres
+        req = C.ImpactRequest(field_id=field_id, condition=condition, affected_acres=acres,
                               stage=stage or ledger.stage, severity=severity, days_until_fixed=days_until_fixed)
         extra = {"crop": crop or (ledger.crop if ledger.crop != "other" else "corn")}
         if expected_yield is not None:
@@ -440,16 +514,39 @@ def _tool_results(messages: list, tool_name: str) -> list[str]:
     return out
 
 
-def _json_or_none(text: str):
-    try:
-        return json.loads(text)
-    except ValueError:
-        return None
+def _json_or_none(text):
+    """A dict from a tool result: already a dict, JSON text, or JSON text wrapped in a JSON string (Gateway)."""
+    for _ in range(3):
+        if isinstance(text, dict):
+            return text
+        if not isinstance(text, (str, bytes)):
+            return None
+        try:
+            text = json.loads(text)
+        except ValueError:
+            return None
+    return text if isinstance(text, dict) else None
+
+
+def _tool_payloads(messages: list, tool_name: str) -> list[dict]:
+    """Dict payloads of every result of `tool_name`, oldest first, from text or json content blocks."""
+    names, out = {}, []
+    for m in messages or []:
+        for c in m.get("content", []):
+            if "toolUse" in c:
+                names[c["toolUse"]["toolUseId"]] = c["toolUse"]["name"]
+            if "toolResult" in c and _bare(names.get(c["toolResult"]["toolUseId"], "")) == tool_name:
+                for x in c["toolResult"].get("content", []):
+                    p = _json_or_none(x["json"]) if "json" in x else _json_or_none(x["text"]) if "text" in x else None
+                    if p is not None:
+                        out.append(p)
+    return out
 
 
 class DiagnosisGuard(HookProvider):
-    """After the supervisor answers: certainty and dollars come from the scorer and impact tools, and any
-    percentage the scorer did not produce is removed from the farmer-facing words. Reads tool results from the
+    """After the supervisor answers: every number comes from the scorer and impact tools, never the model.
+    Hypotheses, condition, how_sure, acres and dollars are overwritten from the last score and impact results, and
+    any percentage the scorer did not produce is removed from the farmer-facing words. Reads tool results from the
     conversation, so it still works when a reply resumes the investigation in a fresh agent."""
 
     def register_hooks(self, registry_: HookRegistry, **kwargs) -> None:
@@ -461,15 +558,29 @@ class DiagnosisGuard(HookProvider):
         if not isinstance(diag, Diagnosis):
             return
         messages = event.agent.messages
-        scores = [p for p in map(_json_or_none, _tool_results(messages, "score_hypotheses")) if isinstance(p, dict)]
-        impacts = [p for p in map(_json_or_none, _tool_results(messages, "estimate_impact")) if isinstance(p, dict)]
-        allowed = {h["percent"] for s in scores for h in s.get("hypotheses", []) if "percent" in h}
-        if not scores:
-            diag.hypotheses = []  # nothing was scored, so there is nothing to copy
-        if scores and scores[-1].get("how_sure"):
-            diag.how_sure = scores[-1]["how_sure"]
-        if impacts and "low_usd" in impacts[-1]:
-            diag.dollars_low, diag.dollars_high = round(impacts[-1]["low_usd"]), round(impacts[-1]["high_usd"])
+        scores = [p for p in _tool_payloads(messages, "score_hypotheses") if isinstance(p.get("hypotheses"), list)]
+        impacts = [p for p in _tool_payloads(messages, "estimate_impact") if "low_usd" in p and "high_usd" in p]
+        allowed = {h["percent"] for s in scores for h in s["hypotheses"] if "percent" in h}
+        diag.hypotheses, diag.condition = [], None
+        if scores:
+            last = scores[-1]
+            for h in last["hypotheses"]:
+                try:
+                    diag.hypotheses.append(C.Hypothesis(condition=h["condition"], probability=h["percent"] / 100,
+                                                        status=h.get("status", "open")))
+                except (KeyError, TypeError, ValueError, ValidationError):
+                    continue
+            top = last.get("top_condition") or (diag.hypotheses[0].condition if diag.hypotheses else None)
+            diag.condition = top if top in typing.get_args(C.ConditionId) else None
+            if last.get("how_sure"):
+                diag.how_sure = last["how_sure"]
+        if impacts:
+            last = impacts[-1]
+            diag.dollars_low, diag.dollars_high = round(last["low_usd"]), round(last["high_usd"])
+            diag.affected_acres = last.get("affected_acres")
+        else:  # no impact estimate: do not keep numbers the model made up
+            diag.dollars_low = diag.dollars_high = 0
+            diag.affected_acres = None
         for f in ("what", "where", "why", "action_detail"):
             setattr(diag, f, scrub_percentages(getattr(diag, f), allowed))
         diag.ruled_out = [scrub_percentages(x, allowed) for x in diag.ruled_out]
@@ -499,9 +610,9 @@ Use send_farmer_message only to text someone on the farm directly (for example a
 question for the farmer and your final diagnosis are sent for you. Farmer-facing text is plain ASCII: no em
 dashes, no emoji.
 
-When you fill in the diagnosis, set condition to the top condition from score_hypotheses, affected_acres to
-the acres you gave estimate_impact, and copy hypotheses exactly from the last score_hypotheses result, with probability = percent / 100
-(leave it empty if you never called it).
+Condition, hypotheses, affected acres and dollars in the diagnosis are filled in for you from the score and
+impact results, so never write your own. Call estimate_impact for the likely condition (the acres come from the
+satellite analysis when it is on file; otherwise give the problem-area acres from the evidence).
 
 You never make up how sure we are. Use the how_sure wording from score_hypotheses, and quote a percent only if
 score_hypotheses gave it. Use the dollar range estimate_impact gave you, as given.

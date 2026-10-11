@@ -81,7 +81,5 @@ class Diagnosis(BaseModel):
             tail = "No action taken. Reply MORE for details."
         what = self.what.rstrip(".")
         why = self.why.rstrip(".")
-        return (
-            f"{self.field_name}: {what}. {why}. "
-            f"At risk if not fixed: ${self.dollars_low:,}-${self.dollars_high:,}. {tail}"
-        )
+        stake = f"At risk if not fixed: ${self.dollars_low:,}-${self.dollars_high:,}. " if self.dollars_high else ""
+        return f"{self.field_name}: {what}. {why}. {stake}{tail}"

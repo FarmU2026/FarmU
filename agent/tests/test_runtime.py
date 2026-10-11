@@ -156,7 +156,7 @@ def test_interrupt_survives_a_new_process_via_s3(monkeypatch):
     assert not (inv.SESSIONS / f"session_fieldwatch-{inv_id}").exists()  # nothing written to local disk
 
     done = inv.reply(inv_id, step.interrupt_id, "YES", emit=lambda e: None)
-    assert done.status == "done" and done.diagnosis.dollars_high == 14000
+    assert done.status == "done" and done.diagnosis.dollars_high == 0  # no impact estimate ran: guard clears the model's dollars
 
 
 # ---------- run_request: events and state against moto ----------
@@ -209,7 +209,7 @@ def test_resume_concludes_and_seq_keeps_rising():
     # a different process: the resume request carries only ids, so farm and field come from the item
     second = inv.run_request(C.ResumeInvestigation.model_validate(
         _resume_payload(interrupt_id=first.interrupt_id, investigation_id=inv_id)))
-    assert second.status == "done" and second.diagnosis["dollars_high"] == 14000
+    assert second.status == "done" and second.diagnosis["dollars_high"] == 0
 
     after = _envelopes(sqs, url)
     concluded = [C.InvestigationConcluded.model_validate(e["detail"]) for e in after if e["detail-type"] == "InvestigationConcluded"]
@@ -223,7 +223,7 @@ def test_resume_concludes_and_seq_keeps_rising():
 
     item = table.get_item(Key={"investigation_id": inv_id})["Item"]
     assert item["status"] == "concluded" and "pending_interrupt_id" not in item
-    assert json.loads(item["diagnosis_json"])["dollars_low"] == 9000
+    assert json.loads(item["diagnosis_json"])["dollars_low"] == 0
 
 
 @mock_aws
