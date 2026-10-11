@@ -28,6 +28,11 @@ class CoreResult:
     gates: C.Gates
     z: np.ndarray | None = None                       # smoothed z map (NaN outside valid pixels)
     region_masks: list[np.ndarray] = field(default_factory=list)  # aligned with anomaly.regions
+    # Arrays the overlays are drawn from (render only; nothing here feeds the decision):
+    baseline: np.ndarray | None = None                # per-pixel NDVI expected for this date (regions.baseline_mean)
+    change: np.ndarray | None = None                  # NDVI now - previous pass where both are clear, else NaN
+    median_departure: float | None = None             # median of (NDVI now - baseline) over valid pixels
+    baseline_method: str | None = None                # "median" (>= 3 seasons) or "mean"
 
 
 def _stats(a: np.ndarray, valid: np.ndarray) -> C.IndexStats:
@@ -70,8 +75,10 @@ def analyze_stacks(current: IndexStack, history: list[IndexStack], previous: Ind
     grid = current.grid
     indices = index_stats(current)
     delta = None
+    change = None
     if previous is not None:
         both = current.valid & previous.valid
+        change = np.where(both, current.ndvi - previous.ndvi, np.nan).astype("float32")
         if both.any():
             delta = round(float(np.median(current.ndvi[both] - previous.ndvi[both])), 3)
     senescence, harvest = G.seasonal(crop, current.date, delta_since_last=delta, ndvi_p50=indices.ndvi.p50)
@@ -80,7 +87,7 @@ def analyze_stacks(current: IndexStack, history: list[IndexStack], previous: Ind
         return CoreResult(
             status="no_baseline", indices=indices,
             anomaly=C.AnomalySummary(field_score=0.0, z_baseline=None, z_cohort=None, delta_since_last=delta, regions=[]),
-            gates=C.Gates(senescence=senescence, harvest=harvest, regional=False),
+            gates=C.Gates(senescence=senescence, harvest=harvest, regional=False), change=change,
         )
 
     hist_ndvi = [h.ndvi for h in history]
@@ -88,7 +95,9 @@ def analyze_stacks(current: IndexStack, history: list[IndexStack], previous: Ind
     diff = np.where(current.valid, current.ndvi - base, np.nan)
     finite = diff[np.isfinite(diff)]
     z_base = None
+    median_departure = None
     if finite.size:
+        median_departure = round(float(np.median(finite)), 3)
         z_base = round(float(np.median(finite)) / regions.season_sd(hist_ndvi), 2)
 
     zpix = regions.pixel_z(diff)
@@ -112,5 +121,6 @@ def analyze_stacks(current: IndexStack, history: list[IndexStack], previous: Ind
         anomaly=C.AnomalySummary(field_score=score, z_baseline=z_base, z_cohort=None,
                                  delta_since_last=delta, regions=out_regions),
         gates=C.Gates(senescence=senescence, harvest=harvest, regional=regional),
-        z=zs, region_masks=masks,
+        z=zs, region_masks=masks, baseline=base, change=change, median_departure=median_departure,
+        baseline_method="median" if len(hist_ndvi) >= 3 else "mean",
     )

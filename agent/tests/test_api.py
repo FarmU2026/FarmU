@@ -167,6 +167,86 @@ def test_image_missing(aws):
     assert call(farms, "GET", f"/api/farms/{FARM}/fields/{FIELD}/other.png")[0] == 404
 
 
+COMPARISON = {
+    "scene_date": "2026-07-18", "previous_date": "2026-07-13", "baseline_dates": ["2023-07-15", "2024-07-18", "2025-07-16"],
+    "baseline_method": "median", "median_departure_ndvi": -0.01,
+    "departure_scale": {"stat": "z", "vmin": -3.0, "vmax": 3.0, "unit": "standard deviations"},
+    "change_scale": {"stat": "ndvi_diff", "vmin": -0.25, "vmax": 0.25, "unit": "NDVI"},
+}
+
+
+def with_comparison_overlays(aws, **extra):
+    from test_api_helpers import REPO
+
+    ov = json.loads((REPO / "agent" / "fixtures" / "contracts" / "field_analysis_result.json").read_text())["overlays"]
+    for kind in ("departure", "change", "normal"):
+        ov[kind] = {"key": f"analysis/north-pivot/2026-07-18/s2/{kind}.png", "bounds": ov["health"]["bounds"]}
+    return put_analysis(aws, FIELD, overlays=ov, comparison=COMPARISON, **extra)
+
+
+def test_overlay_key_resolves_the_comparison_kinds():
+    from cloud.api import store
+
+    row = {"overlays": {k: {"key": f"a/{k}.png", "bounds": [0, 0, 1, 1]}
+                        for k in ("true_color", "health", "mask", "departure", "change", "normal")}}
+    assert [store.overlay_key(row, k) for k in ("departure", "change", "normal", "truecolor", "mask")] == [
+        "a/departure.png", "a/change.png", "a/normal.png", "a/true_color.png", "a/mask.png"]
+    assert store.overlay_key({"overlays": {"health": {"key": "h"}}}, "departure") is None   # older rows: no image
+    assert store.overlay_kinds(row) == ["true_color", "health", "mask", "departure", "change", "normal"]
+    assert store.overlay_kinds({"overlays": {"true_color": {"key": "t"}}}) == ["true_color"]
+
+
+def test_comparison_images_are_served_by_the_existing_image_route(aws):
+    signup(farms)
+    with_comparison_overlays(aws)
+    for kind in ("departure", "change", "normal"):
+        code, _, headers = call(farms, "GET", f"/api/farms/{FARM}/fields/{FIELD}/{kind}.png")
+        assert code == 302 and f"/s2/{kind}.png" in headers["Location"]
+
+
+def test_comparison_image_missing_on_an_older_analysis(aws):
+    signup(farms)
+    put_analysis(aws, FIELD)  # the fixture row has no departure / change / normal
+    assert call(farms, "GET", f"/api/farms/{FARM}/fields/{FIELD}/truecolor.png")[0] == 302
+    for kind in ("departure", "change", "normal"):
+        assert call(farms, "GET", f"/api/farms/{FARM}/fields/{FIELD}/{kind}.png")[0] == 404
+
+
+def test_farm_payload_carries_the_overlay_captions_additively(aws):
+    signup(farms)
+    with_comparison_overlays(aws)
+    code, farm, _ = call(farms, "GET", f"/api/farms/{FARM}", route_key="GET /api/farms/{farm_id}")
+    f = farm["fields"][0]
+    assert code == 200 and f["stats"]["scene_date"] == "2026-07-18" and f["last_scene_date"] == "2026-07-18"
+    assert f["overlay_kinds"] == ["true_color", "health", "mask", "departure", "change", "normal"]
+    assert f["overlay_date"] == "2026-07-18"
+    assert f["comparison"]["previous_date"] == "2026-07-13"
+    assert f["comparison"]["baseline_dates"] == ["2023-07-15", "2024-07-18", "2025-07-16"]
+    assert f["comparison"]["departure_scale"]["vmax"] == 3.0
+
+
+def test_farm_payload_for_an_older_row_lists_only_its_images(aws):
+    signup(farms)
+    put_analysis(aws, FIELD)
+    f = call(farms, "GET", f"/api/farms/{FARM}", route_key="GET /api/farms/{farm_id}")[1]["fields"][0]
+    assert f["overlay_kinds"] == ["true_color", "health", "mask"] and "comparison" not in f
+
+
+def test_farm_payload_captions_follow_the_images_not_a_newer_cloudy_row(aws):
+    signup(farms)
+    with_comparison_overlays(aws)
+    put_analysis(aws, FIELD, date="2026-07-20", status="too_cloudy", overlays=None)
+    f = call(farms, "GET", f"/api/farms/{FARM}", route_key="GET /api/farms/{farm_id}")[1]["fields"][0]
+    assert f["overlay_date"] == "2026-07-18" and f["comparison"]["scene_date"] == "2026-07-18"
+    assert "stats" not in f  # unchanged: stats come from the newest row, which is not ok
+
+
+def test_farm_payload_without_any_analysis_has_no_overlay_keys(aws):
+    signup(farms)
+    f = call(farms, "GET", f"/api/farms/{FARM}", route_key="GET /api/farms/{farm_id}")[1]["fields"][0]
+    assert "overlay_kinds" not in f and "comparison" not in f
+
+
 def test_status(aws):
     code, st, _ = call(farms, "GET", "/api/status")
     assert code == 200 and st["sms_provider"] == "none" and "model" in st
