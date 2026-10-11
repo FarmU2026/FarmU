@@ -85,6 +85,18 @@ class InsuranceNoticeIn(_WriteIn):
     person_id: str
 
 
+class FarmerMessageIn(_In):
+    """contracts.SendMessageRequest minus the fields the server sets (schema_version, farm_id, idempotency_key)
+    and minus `approval` (approvals belong to the write tools above). investigation_id is required: the Gateway's
+    Cedar messaging policy (infra/policies/cedar) only permits messages that name their investigation."""
+
+    person_id: str
+    body: str = Field(max_length=480, description="Plain words, under ~300 characters, no emoji")
+    investigation_id: str = Field(min_length=1)
+    link: dict | None = Field(default=None, description="{scope, subject_id, ttl_hours}: appends a signed link")
+    urgency: Literal["low", "actionable", "urgent"] = "actionable"
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
@@ -146,6 +158,10 @@ TOOLS: list[ToolSpec] = [
     ToolSpec("create_scout_pin", "Drop a scouting pin with what to look for and text it to the person who will walk it. "
              "Requires an approved approval_id.", "write", ScoutPinIn, A.create_scout_pin, output_model=C.Action,
              workstream=8, notes="Idempotent on approval_id."),
+    ToolSpec("send_farmer_message", "Text a person on the farm. No approval needed; quiet hours and the daily "
+             "cap are enforced by the notify lane.", "write", FarmerMessageIn, T.deliver_message,
+             output_model=C.SendMessageResult, workstream=9,
+             notes="Calls interfaces.notify().send (WS9 send Lambda); mirror-only when no notify lane is configured."),
     ToolSpec("draft_insurance_notice", "Draft a notice of loss for the farmer to review and send. Requires an approved "
              "approval_id.", "write", InsuranceNoticeIn, A.draft_insurance_notice, output_model=C.Action, workstream=8,
              notes="Sends nothing; the draft is in Action.instructions. document_key (S3) is not implemented yet."),

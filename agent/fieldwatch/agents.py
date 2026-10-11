@@ -126,7 +126,8 @@ def build_supervisor(timeline: ToolTimeline, session_manager=None, tools: list |
     return Agent(
         name="supervisor",
         model=model(),
-        tools=build_specialists(timeline, tools) + _pick(tools, T.list_fields, T.estimate_loss) + T.WRITE_TOOLS,
+        tools=(build_specialists(timeline, tools) + _pick(tools, T.list_fields, T.estimate_loss) + T.WRITE_TOOLS
+               + T.MESSAGE_TOOLS),  # interfaces repair (B4): send_farmer_message, no approval needed
         hooks=[timeline],
         callback_handler=None,
         session_manager=session_manager,

@@ -1,6 +1,8 @@
 """Typed outputs. The text message, the web page and the dollar figure all come from one object."""
 from pydantic import BaseModel, Field
 
+from .contracts import ConditionId, Hypothesis
+
 
 class SpecialistResponse(BaseModel):
     specialist: str = Field(description="imagery, weather, or soil")
@@ -23,6 +25,14 @@ class Diagnosis(BaseModel):
         description="One of: repair_work_order, scouting_pin, request_photo, insurance_notice, none"
     )
     action_detail: str = Field(description="What the person doing the action should check or do")
+    # --- interfaces repair (B5): what InvestigationConcluded needs. Optional, so older outputs still validate.
+    condition: ConditionId | None = Field(default=None, description="The likely condition id from the catalog")
+    affected_acres: float | None = Field(default=None, description="Acres the dollar range was estimated on")
+    hypotheses: list[Hypothesis] = Field(
+        default_factory=list,
+        description="Copy exactly from the last score_hypotheses result; leave empty if it was not called. "
+                    "Never write your own probabilities.",
+    )
 
     def to_text(self, approved: bool | None = None) -> str:
         """The SMS. Under ~300 chars, five things: what, where, why, stake, what to do.

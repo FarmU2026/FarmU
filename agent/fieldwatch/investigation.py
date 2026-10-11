@@ -192,6 +192,14 @@ def infer_condition(diag: Diagnosis) -> str:
     return "unknown"
 
 
+def impact_of(diag: Diagnosis) -> C.ImpactEstimate | None:
+    """The dollar range the supervisor copied from estimate_loss / estimate_impact, when it gave the acres."""
+    if not diag.affected_acres:
+        return None
+    return C.ImpactEstimate(affected_acres=diag.affected_acres, low_usd=diag.dollars_low, high_usd=diag.dollars_high,
+                            basis=f"{diag.affected_acres:g} affected acres, from the loss estimate tool")
+
+
 class Recorder:
     """Writes an investigation's state to fw-investigations and its steps to the `fieldwatch` bus.
 
@@ -292,17 +300,20 @@ class Recorder:
             self.progress(agent, "tool_call", f"Done: {label.lower()}" if ok else f"That did not work: {label.lower()}",
                           tool=tool, latency_ms=e.get("ms"))
 
-    def concluded(self, diag: Diagnosis) -> None:
-        """impact stays None and hypotheses empty: Diagnosis has no acres or scorer output (see the WS7 report)."""
+    def concluded(self, diag: Diagnosis, message_id: str | None = None) -> None:
+        """condition, hypotheses and affected acres come from the Diagnosis (the scorer's output copied through);
+        the condition falls back to a keyword guess and impact is omitted when the agent didn't give acres."""
         self._put(C.InvestigationConcluded(
             occurred_at=_now(), investigation_id=self.investigation_id,
             field=C.FieldRef(farm_id=self.farm_id, field_id=self.field),
-            condition=infer_condition(diag),
+            condition=diag.condition or infer_condition(diag),
             summary=f"{diag.what.rstrip('.')}. {diag.why.rstrip('.')}.",
-            hypotheses=[],
+            hypotheses=list(diag.hypotheses),
+            impact=impact_of(diag),
             proposed_action=C.ProposedAction(
                 action_type=_ACTION_TYPE.get(diag.recommended_action, "none"), summary=diag.action_detail,
             ),
+            message_id=message_id,
         ))
 
 
@@ -317,10 +328,13 @@ def run_request(req: C.StartInvestigation | C.ResumeInvestigation, recorder: Rec
     rec.set_status("running", remove=("pending_interrupt_id",))
     rec.progress("supervisor", "plan", "Picking the investigation back up" if resuming else "Starting to look into this field")
     try:
-        if resuming:
-            step = reply(inv, req.interrupt_id, req.text, emit=rec.on_hook_event)
-        else:
-            step = start(inv, req.field, emit=rec.on_hook_event)
+        from . import farmdata
+
+        with farmdata.use_farm(rec.farm_id or None):  # tools read this farm (FIELDWATCH_DATA_BACKEND=dynamo)
+            if resuming:
+                step = reply(inv, req.interrupt_id, req.text, emit=rec.on_hook_event)
+            else:
+                step = start(inv, req.field, emit=rec.on_hook_event)
     except Exception as exc:
         log.exception("investigation %s failed", inv)
         # a failed resume keeps its interrupt, so the starter can try the same answer again
@@ -333,15 +347,37 @@ def run_request(req: C.StartInvestigation | C.ResumeInvestigation, recorder: Rec
         )
 
     out = to_agent_step(step, inv)
+    sent = deliver(rec, step)  # the question or the final message goes out through the notify lane
+    message = {"message_id": sent.message_id, "message_sent_at": _now()} if sent else {}
     if step.status == "waiting_for_farmer":
-        rec.set_status("awaiting_reply", pending_interrupt_id=step.interrupt_id, last_text=step.text)
+        rec.set_status("awaiting_reply", pending_interrupt_id=step.interrupt_id, last_text=step.text, **message)
         rec.progress("supervisor", "waiting", "Waiting for the farmer's answer")
     else:
+        diag = step.diagnosis
         rec.set_status(
             "concluded", last_text=step.text,
             diagnosis_json=json.dumps(out.diagnosis) if out.diagnosis else None,
+            condition=(diag.condition or infer_condition(diag)) if diag else None, **message,
         )
-        if step.diagnosis:
-            rec.concluded(step.diagnosis)
+        if diag:
+            rec.concluded(diag, message_id=sent.message_id if sent else None)
         rec.progress("supervisor", "done", "Investigation finished")
     return out
+
+
+def deliver(rec: Recorder, step: Step) -> C.SendMessageResult | None:
+    """Send the step's text to the farmer with tools.deliver_message (the send_farmer_message tool's path).
+    Idempotent per question / conclusion. Best-effort: a failed text is logged, never fails the investigation."""
+    if not step.text:
+        return None
+    from . import farmdata
+    from . import tools as T
+
+    kind = f"ask#{step.interrupt_id}" if step.status == "waiting_for_farmer" else "concluded"
+    try:
+        with farmdata.use_farm(rec.farm_id or None):
+            return T.deliver_message(person_id=T._farmer_id(), body=step.text, investigation_id=rec.investigation_id,
+                                     idempotency_key=f"{rec.investigation_id}#{kind}", farm_id=rec.farm_id or None)
+    except Exception:
+        log.exception("could not send the message for %s", rec.investigation_id)
+        return None

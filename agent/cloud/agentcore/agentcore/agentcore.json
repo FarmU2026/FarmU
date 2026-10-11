@@ -27,7 +27,10 @@
         { "name": "FIELDWATCH_MODEL", "value": "us.anthropic.claude-haiku-4-5-20251001-v1:0" },
         { "name": "FIELDWATCH_TOOLS_BACKEND", "value": "gateway" },
         { "name": "FIELDWATCH_EVENT_BUS", "value": "fieldwatch" },
-        { "name": "FIELDWATCH_TABLE_PREFIX", "value": "fw-" }
+        { "name": "FIELDWATCH_TABLE_PREFIX", "value": "fw-" },
+        { "name": "FIELDWATCH_APPROVALS_BACKEND", "value": "dynamo" },
+        { "name": "FIELDWATCH_DATA_BACKEND", "value": "dynamo" },
+        { "name": "FIELDWATCH_SEND_FN", "value": "fw-notify-send" }
       ],
       "additionalPolicies": ["policies/runtime-access.json"],
       "lifecycleConfiguration": {

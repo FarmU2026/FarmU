@@ -454,8 +454,10 @@ def test_cedar_policy_covers_registry():
     blocks = {m.group(1): m.group(2) for m in re.finditer(r"// ---- policy: (\S+) ----\n(.*?)(?=\n// ---- policy:|\Z)", text, re.S)}
     assert set(blocks) == {"fieldwatch-read-tools", "fieldwatch-write-tools-need-approval", "fieldwatch-messaging-tools"}
     tools_in = {n: set(re.findall(r'\{\{TARGET\}\}___(\w+)"', b)) for n, b in blocks.items()}
+    messaging = {"send_farmer_message", "request_photo"}  # write, but no approval (Cedar messaging policy)
     for spec in TOOLS:
-        home = "fieldwatch-write-tools-need-approval" if spec.access == "write" else "fieldwatch-read-tools"
+        home = ("fieldwatch-messaging-tools" if spec.name in messaging else
+                "fieldwatch-write-tools-need-approval" if spec.access == "write" else "fieldwatch-read-tools")
         assert spec.name in tools_in[home], f"{spec.name} missing from the Cedar {home} policy"
         for other, names in tools_in.items():
             assert other == home or spec.name not in names, f"{spec.name} also in {other}"
