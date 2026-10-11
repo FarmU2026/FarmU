@@ -26,7 +26,7 @@ from boto3.dynamodb.conditions import Key
 
 from fieldwatch import interfaces
 
-from . import _aws
+from . import _aws, _diagnoses
 from ._http import ApiError
 
 THREAD_PREFIX = "THREAD#"
@@ -270,17 +270,24 @@ def farm_view(farm_id: str) -> dict:
     owner = None
     if farm.get("owner_person_id"):
         owner = _aws.get_item("farms", farm_id=farm_id, item=f"PERSON#{farm['owner_person_id']}")
+    fields = list_fields(farm_id)
+    # Recommendations as the local harness reports them (see _diagnoses): `diagnoses` oldest first, and `pending`
+    # while a run waits for the farmer's YES / NO.
+    people = [farm["owner_person_id"]] if farm.get("owner_person_id") else []
+    people += [p["person_id"] for p in list_people(farm_id) if p.get("person_id") and p["person_id"] not in people]
+    diagnoses, pending = _diagnoses.build(farm_id, fields, people)
     return {
         "farm_id": farm_id,
         "name": farm.get("name"),
         "phone": farm.get("phone"),
         "farmer": {"name": farm.get("farmer_name", "Farmer"), "channel": "text"},
-        "fields": [ui_field(f) for f in list_fields(farm_id)],
+        "fields": [ui_field(f) for f in fields],
         "thread": thread(farm_id),
         "muted": bool(farm.get("muted") or (owner or {}).get("opted_out")),
         "last_checked": farm.get("last_checked"),
-        "pending": None,
+        "pending": pending,
         "backend": "cloud",
+        "diagnoses": diagnoses,
     }
 
 

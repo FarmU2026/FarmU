@@ -17,6 +17,11 @@ skips that hand-off:
                                                      forwarded to WS9's webhook handler)
     -c smsProvider=twilio  -c smsFrom=+1...                             (shown by GET /api/status)
     -c twilioWebhookUrl=https://...                                     (only behind a custom domain)
+    -c publicUrl=https://dxxxx.cloudfront.net                           FIELDWATCH_PUBLIC_URL: base of the report /
+                                                     work-order links in GET /api/farms/{id}. Optional: unset gives
+                                                     site-relative links, which work from the CloudFront site. (The
+                                                     Frontend stack depends on this one, so its domain can't be a
+                                                     CDK reference here.)
 SSM parameters read at runtime (create by hand; CloudFormation can't create SecureStrings):
     /fieldwatch/link-signing-key, /fieldwatch/dashboard-passcode, /fieldwatch/twilio-auth-token
 """
@@ -101,6 +106,7 @@ class Api(Stack):
             "FIELDWATCH_SMS_PROVIDER": opt("smsProvider") or "none",
             "FIELDWATCH_SMS_FROM": opt("smsFrom"),
             "FIELDWATCH_TWILIO_WEBHOOK_URL": opt("twilioWebhookUrl"),
+            "FIELDWATCH_PUBLIC_URL": opt("publicUrl"),
             **fns,
         }
         env = {k: v for k, v in env.items() if v}
@@ -147,6 +153,7 @@ class Api(Stack):
             data.bucket.grant_read(fn, "analysis/*")
             if group == "farms":
                 t["fw-fields"].grant_read_write_data(fn)
+                t["fw-actions"].grant_read_data(fn)  # GET /api/farms/{id}: work order status for the diagnoses
                 data.bucket.grant_put(fn, "fields/*")
             if group == "pages":
                 t["fw-actions"].grant_read_write_data(fn)
