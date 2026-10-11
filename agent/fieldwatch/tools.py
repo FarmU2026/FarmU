@@ -294,5 +294,5 @@ def send_farmer_message(person_id: str, body: str, investigation_id: str = "", u
 
 
 READ_TOOLS = [list_fields, look_at_field, get_scene_analysis, get_weather, get_soil, estimate_loss]
-WRITE_TOOLS = [create_work_order, create_scout_pin, request_photo]
+WRITE_TOOLS = [create_work_order, create_scout_pin]  # request_photo: off until photo intake exists
 MESSAGE_TOOLS = [send_farmer_message]
