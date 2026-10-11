@@ -11,7 +11,7 @@
   const demo = params.get("demo") === "1";
 
   let farmId = null, farm = null, busy = false, mode = "connecting", tab = "draw";
-  let rt = null, pollTimer = null, guardTimer = null, refreshing = false, renderQueued = false;
+  let epoch = 0, rt = null, pollTimer = null, guardTimer = null, refreshing = false, renderQueued = false;
   let thread = [], threadErr = "", threadFirst = true;
   const invs = new Map();        // investigation id -> { id, fieldId, fieldName, items[], hyps, concluded, rt, updated, reportUrl, workUrl }
   const fieldState = {};         // field id -> tone set by the feed
@@ -75,8 +75,12 @@
       b.title = !farmId && name !== "draw" ? "Opens after you start watching your fields" : "";
     }
     const mapTab = t === "draw" || t === "plots";
-    $("stage").classList.toggle("nomap", !mapTab);
+    $("stage").classList.toggle("nomap", t !== "draw");
     $("mapHint").hidden = t !== "draw";
+    // one Leaflet map, two homes: full size beside the Draw form, compact in the Plots page
+    const wrap = $("mapwrap");
+    if (t === "plots" && wrap.parentElement !== $("mapSlot")) { $("mapSlot").appendChild(wrap); fitNext = true; userMoved = false; }
+    else if (t === "draw" && wrap.parentElement !== $("stage")) { $("stage").insertBefore(wrap, $("stage").firstChild); fitNext = true; userMoved = false; }
     if (mapTab) setTimeout(() => { map.invalidateSize(); if (fitNext) fitFields(); }, 30);
     if (t === "text") { threadFirst = true; }
     if (t !== "draw" && draft.target) cancelRedraw(true);
@@ -114,7 +118,7 @@
     });
     g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("stage").style.setProperty("--sheet", $("stage").style.getPropertyValue("--sheet") === "78%" ? "42%" : "78%"); } });
   });
-  const sheetUp = () => { if (matchMedia("(max-width: 999px)").matches) $("stage").style.setProperty("--sheet", "70%"); };
+  const sheetUp = () => { if (tab === "draw" && matchMedia("(max-width: 999px)").matches) $("stage").style.setProperty("--sheet", "70%"); };
 
   // ---------- drawing ----------
   let drawPoly = null, vtx = [];
@@ -175,16 +179,25 @@
     saving = true; drawUi(); $("addField").textContent = "Adding...";
     try {
       let res;
-      if (demo) { res = null; farm.fields.push({ id: slug(name), name, crop, acres: 0, polygon: polygon.map(([a, b]) => [b, a]), stats: null }); }
+      if (demo) { res = null; farm.fields.push({ id: slug(name) + "-" + (farm.fields.length + 1), name, crop, acres: Math.round(acresOf(polygon)), polygon: polygon.map(([a, b]) => [b, a]), stats: null }); }
       else res = await FW.fieldsApi.add(farmId, { name, crop, polygon });
+      const before = new Set(fieldsOf().map((x) => x.id));
+      if (res) applyEdited(res);
+      const added = fieldsOf().find((x) => !before.has(x.id)) || fieldsOf().find((x) => x.name === name);
       clearDraft(); $("fname").value = "";
       $("drawMsg").className = "meta"; $("drawMsg").innerHTML = `Added ${esc(name)}. <a href="#plots" data-go="plots">See it in Plots</a>`;
-      fitNext = true; userMoved = false;
-      if (res && res.fields) applyFarm(res); else if (!demo) await refresh(); else schedule();
+      if (added) selected = added.id;
+      fitNext = true; userMoved = false; schedule();
     } catch (e) {
       $("drawMsg").className = e.code === "UNAVAILABLE" ? "meta" : "err"; $("drawMsg").textContent = e.message;
     } finally { saving = false; drawUi(); }
   };
+  // rough acres from [lat, lon] corners (demo only; the server computes the real number)
+  function acresOf(pts) {
+    const lat0 = pts.reduce((a, p) => a + p[0], 0) / pts.length, kx = 111320 * Math.cos(lat0 * Math.PI / 180), ky = 110574;
+    let a = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += (p[1] * kx) * (q[0] * ky) - (q[1] * kx) * (p[0] * ky); }
+    return Math.abs(a) / 2 / 4046.86;
+  }
   $("fname").addEventListener("input", () => { $("drawMsg").textContent = ""; });
 
   async function saveOutline() {
@@ -193,7 +206,7 @@
     saving = true; drawUi();
     try {
       if (demo) f.polygon = polygon.map(([a, b]) => [b, a]);
-      else { const r = await FW.fieldsApi.update(farmId, f.id, { polygon }); if (r && r.fields) applyFarm(r); else await refresh(); }
+      else applyEdited(await FW.fieldsApi.update(farmId, f.id, { polygon }));
       plotMsg = { id: f.id, text: "New outline saved.", tone: "" }; selected = f.id; fitNext = true; userMoved = false;
       cancelRedraw(true); go("plots");
     } catch (e) { $("drawMsg").className = e.code === "UNAVAILABLE" ? "meta" : "err"; $("drawMsg").textContent = e.message; }
@@ -242,8 +255,8 @@
   // ---------- farm data (polling / initial load) ----------
   async function refresh() {
     if (!farmId || demo || refreshing) return;
-    refreshing = true;
-    try { applyFarm(await api(`/api/farms/${encodeURIComponent(farmId)}`)); }
+    refreshing = true; const at = epoch;
+    try { const f = await api(`/api/farms/${encodeURIComponent(farmId)}`); if (at === epoch) applyFarm(f); }
     catch (e) {
       if (e.status === 404 && !farm) fail("We could not find that farm. Check the link, or sign up again.");
       else if (!farm) fail(e.message);
@@ -261,6 +274,9 @@
     renderMap(); route();
   }
 
+  // A farm payload that came back from an edit (add, rename, redraw, delete). It beats any poll still in flight.
+  function applyEdited(f) { epoch++; applyFarm(f); }
+  async function reloadFarm() { epoch++; applyFarm(await api(`/api/farms/${encodeURIComponent(farmId)}`)); }
   function applyFarm(f) {
     farm = f; feedNote = "";
     thread = (f.thread || []).map((m) => ({ who: m.who, text: m.text, at: m.at, kind: m.kind, sms: m.sms, inv: m.investigation_id }));
@@ -269,26 +285,47 @@
     schedule();
   }
 
-  // Poll mode has no feed: rebuild steps from the saved thread and the last diagnosis.
+  // Poll mode has no feed: rebuild what we can from the saved farm payload.
+  //  - thread steps -> "what we checked"
+  //  - diagnoses[] (local harness: what, where, why, dollars, how_sure, action) -> the latest diagnosis per field
+  //  - thread items kind "concluded" / "action" with investigation_id + field_id (cloud) -> a bare recommendation
   function ingestServerSteps(f) {
-    const counts = {};
-    (f.thread || []).forEach((m) => {
-      if (m.kind !== "step" || !m.investigation_id) return;
+    const counts = {}, th = f.thread || [];
+    th.forEach((m, n) => {
+      if (!m.investigation_id) return;
       const i = getInv(m.investigation_id);
       if (i.rt) return;
-      counts[i.id] = (counts[i.id] || 0) + 1;
-      addItem(i, { key: "p" + counts[i.id], kind: "step", who: "", text: m.text, quiet: true });
+      if (m.kind === "step") { counts[i.id] = (counts[i.id] || 0) + 1; addItem(i, { key: "p" + counts[i.id], kind: "step", who: "", text: m.text, quiet: true }); }
+      else if (m.kind === "concluded" && !i.diag) {
+        i.fieldId = m.field_id || i.fieldId; i.updated = Date.parse(m.at) || n + 1;
+        i.concluded = { summary: m.text || "", from: "thread" };
+      } else if (m.kind === "action") i.decision = /declin/i.test(m.text || "") ? "declined" : "approved";
     });
-    const d = (f.diagnoses || [])[(f.diagnoses || []).length - 1];
-    if (d) {
-      const id = (f.pending && f.pending.investigation_id) || lastInvId(f.thread) || "latest";
+    const ds = f.diagnoses || [], lastFor = {};
+    ds.forEach((d, n) => { lastFor[String(d.field_name).toLowerCase()] = n; });
+    ds.forEach((d, n) => {
+      if (lastFor[String(d.field_name).toLowerCase()] !== n) return;
+      const newest = n === ds.length - 1;
+      const id = newest ? ((f.pending && f.pending.investigation_id) || lastInvId(th) || "latest") : "diag-" + n;
       const i = getInv(id);
-      if (!i.rt) {
-        i.hyps = (d.ruled_out || []).map((c) => ({ condition: c, status: "ruled_out" }));
-        i.concluded = { summary: `${d.where ? capital(d.where) + ". " : ""}${d.how_sure ? capital(d.how_sure) + "." : ""}`.trim(), action: d.action_detail ? { summary: d.action_detail } : null };
-        i.fieldName = d.field_name;
+      if (i.rt) return;
+      const hyps = (d.hypotheses || []).length ? d.hypotheses : (d.ruled_out || []).map((c) => ({ condition: c, status: "ruled_out" }));
+      i.diag = d; i.hyps = hyps; i.fieldName = d.field_name; i.updated = i.updated || n + 1;
+      i.where = d.where || ""; i.why = d.why || ""; i.howSure = d.how_sure || "";
+      i.concluded = {
+        condition: d.condition, summary: d.what || "",
+        impact: d.dollars_high ? { low_usd: d.dollars_low, high_usd: d.dollars_high, affected_acres: d.affected_acres } : null,
+        action: d.action_detail || d.recommended_action ? { summary: d.action_detail || "", type: d.recommended_action } : null,
+      };
+      if (newest) {
+        i.waiting = !!f.pending;
+        if (!f.pending) {
+          const mine = th.filter((m) => m.who === "farmer");
+          const last = mine.length ? String(mine[mine.length - 1].text || "") : "";
+          i.decision = /^\s*(no|n)\b/i.test(last) ? "declined" : /^\s*(yes|y)\b/i.test(last) ? "approved" : "";
+        } else i.decision = "";
       }
-    }
+    });
   }
   const lastInvId = (t) => { for (let k = (t || []).length - 1; k >= 0; k--) if (t[k].investigation_id) return t[k].investigation_id; return null; };
 
@@ -377,7 +414,8 @@
       }
       case "action_created": {
         const i = getInv(id); touch(i, fieldOf(p, m), p);
-        if (demo && !i.workUrl) i.workUrl = "workorder.html?fixture=1";
+        i.decision = p.status === "declined" || /declin/i.test(p.summary || p.text || "") ? "declined" : "approved";
+        if (demo && !i.workUrl && i.decision === "approved") i.workUrl = "workorder.html?fixture=1";
         addItem(i, { key: "a" + (p.action_id || m.ts), kind: "done", who: "", text: p.summary || p.instructions || "A repair ticket was sent.", tag: "Ticket sent" });
         break;
       }
@@ -419,16 +457,19 @@
 
   // ---------- status words (always a word beside the color) ----------
   const TONE_WORD = { bad: "Needs a look", busy: "Checking closer", wait: "Waiting for a clear pass", "": "Watching" };
+  const invMatches = (i, f) => i.fieldId === f.id || (i.fieldName && i.fieldName.toLowerCase() === f.name.toLowerCase());
+  const bestInv = (f) => { let b = null; for (const i of invs.values()) if (i.concluded && invMatches(i, f) && (!b || i.updated >= b.updated)) b = i; return b; };
+  // The one place that decides a field's status. The map, the field list, the recommendations and Activity all call it.
   function fieldTone(f) {
     let t = null;
     for (const i of invs.values()) {
-      if (i.fieldId === f.id || (i.fieldName && i.fieldName.toLowerCase() === f.name.toLowerCase())) {
+      if (invMatches(i, f)) {
         if (i.concluded) return "bad";
         if (i.rt) t = "busy";
       }
     }
     if (t) return t;
-    if (fieldState[f.id] != null) return fieldState[f.id] === "good" ? "" : fieldState[f.id];
+    if (fieldState[f.id] != null && fieldState[f.id] !== "good") return fieldState[f.id];
     return f.stats ? "" : "wait";
   }
   const MAP_COLOR = { bad: "#FF6B60", busy: "#F2B24A", wait: "#E6E8E2", "": "#4FD1A1" };
@@ -457,11 +498,14 @@
   }
   const lastPass = (f) => (f.stats && f.stats.scene_date) || f.last_scene_date || "";
 
+  const CROPS = ["corn", "soybeans", "wheat", "milo", "alfalfa"];
+  const passDate = (d) => (d ? FW.niceDate(d) : "");
+
   function plotRow(f) {
     const tone = fieldTone(f), sel = f.id === selected, s = f.stats;
     let h = `<li class="${sel ? "sel" : ""}"><button class="rowbtn" type="button" data-sel="${esc(f.id)}" aria-expanded="${sel}">
       <span class="rowtop"><span class="rowname">${esc(f.name)}</span>${statusHtml(tone)}</span>
-      <span class="meta">${esc(f.crop)}${f.acres ? ` &middot; ${Math.round(f.acres)} acres` : ""}${lastPass(f) ? ` &middot; last pass ${esc(lastPass(f))}` : ""}</span></button>`;
+      <span class="meta">${esc(f.crop)}${f.acres ? ` &middot; ${Math.round(f.acres)} acres` : ""} &middot; ${lastPass(f) ? `last pass ${esc(passDate(lastPass(f)))}` : "no clear pass yet"}</span></button>`;
     if (sel) {
       h += `<div class="detail">`;
       if (!s) h += `<p class="quiet">No clear pass yet. We will check again when the sky is clear.</p>`;
@@ -471,8 +515,8 @@
           <figure><img loading="lazy" alt="Crop health of ${esc(f.name)}" src="${esc(imgSrc(f, "health"))}" onerror="this.style.visibility='hidden'"><figcaption>Crop health: green strong, brown weak</figcaption></figure></div>`;
       }
       h += `<div class="actions"><button class="btn secondary" type="button" data-ask="${esc(f.id)}" ${askBusy ? "disabled" : ""}>${askBusy === f.id ? "Asking..." : "Ask FieldWatch about this field"}</button></div>
-        <label for="ename">Name</label><input id="ename" value="${esc(f.name)}" autocomplete="off">
-        <label for="ecrop">Crop</label><select id="ecrop">${["corn", "soybeans", "wheat", "milo", "alfalfa"].concat(["corn", "soybeans", "wheat", "milo", "alfalfa"].includes(f.crop) ? [] : [f.crop]).map((c) => `<option${c === f.crop ? " selected" : ""}>${esc(c)}</option>`).join("")}</select>
+        <div class="editgrid"><div><label for="ename">Name</label><input id="ename" value="${esc(f.name)}" autocomplete="off"></div>
+        <div><label for="ecrop">Crop</label><select id="ecrop">${CROPS.concat(CROPS.includes(f.crop) ? [] : [f.crop]).map((c) => `<option${c === f.crop ? " selected" : ""}>${esc(c)}</option>`).join("")}</select></div></div>
         <div class="actions"><button class="btn secondary" type="button" data-save="${esc(f.id)}" ${saving ? "disabled" : ""}>${saving ? "Saving..." : "Save changes"}</button>
           <button class="btn secondary" type="button" data-redraw="${esc(f.id)}">Redraw outline</button></div>`;
       if (confirmDel === f.id) h += `<p class="step">Stop watching ${esc(f.name)}? This cannot be undone.</p>
@@ -483,7 +527,91 @@
     }
     return h + `</li>`;
   }
+
+  // ---------- recommendations (Plots hero) ----------
+  // Everything below comes from the farm payload and the feed. Nothing is made up: a row that has no data is left out.
+  const SURE = { pretty: 0.8, fairly: 0.55 }; // same cut-offs as how_sure_phrase() in agent/fieldwatch/schemas.py
+  const topHyp = (i) => { const hs = i.hyps || []; return hs.find((h) => h.status === "likely") || [...hs].sort((a, b) => (b.probability || 0) - (a.probability || 0)).find((h) => h.status !== "ruled_out") || null; };
+  function sureText(i) {
+    const top = topHyp(i), pct = top && top.probability != null ? Math.round(top.probability * 100) : null;
+    let word = i.howSure;
+    if (!word && pct != null) word = top.probability >= SURE.pretty ? "pretty sure" : top.probability >= SURE.fairly ? "fairly sure" : "not sure, need a photo";
+    if (!word) return "";
+    return capital(word) + (pct != null && !/photo/.test(word) ? ` (${pct}%)` : "");
+  }
+  function whyText(i) {
+    if (i.why) return i.why;
+    const top = topHyp(i), parts = [];
+    const sup = i.items.filter((x) => x.kind === "evidence" && x.dir && x.dir !== "refutes" && (!top || !x.hyp || x.hyp === top.condition)).map((x) => x.why || x.text).filter(Boolean);
+    if (sup.length) parts.push(sup[sup.length - 1]);
+    const out = (i.hyps || []).filter((h) => h.status === "ruled_out").map((h) => condition(h.condition).toLowerCase());
+    if (out.length) parts.push(`We ruled out ${out.join(", ")}.`);
+    return parts.join(" ");
+  }
+  const ACTION_WORD = { work_order: "Repair ticket", repair_work_order: "Repair ticket", scout_pin: "Scouting pin", scouting_pin: "Scouting pin", photo_request: "Photo request", request_photo: "Photo request", insurance_notice: "Insurance notice" };
+  function recState(i) {
+    const a = i.concluded && i.concluded.action, type = a && (a.action_type || a.type);
+    if (type === "none") return "none";
+    if (i.decision === "declined") return "declined";
+    if (i.decision === "approved" || i.workUrl) return "approved";
+    return "waiting";
+  }
+  function recHtml(f, i) {
+    const c = i.concluded, imp = c.impact, a = c.action, st = recState(i), type = a && (a.action_type || a.type);
+    const where = i.where || (f.stats && f.stats.weakest_area ? `Weakest in the ${f.stats.weakest_area}.` : "");
+    const share = f.stats && f.stats.share_of_field_below_0_3 ? `About ${Math.round(f.stats.share_of_field_below_0_3 * 100)}% of the field looks bare or stressed.` : "";
+    const why = whyText(i), sure = sureText(i);
+    const stateWord = { waiting: "Waiting for your YES", approved: "Approved", declined: "You said no", none: "" }[st];
+    const row = (k, v) => (v ? `<div><dt>${k}</dt><dd>${v}</dd></div>` : "");
+    let h = `<article class="rec" aria-label="${esc(f.name)}">
+      <div class="rec-top"><h3>${esc(f.name)}</h3>${statusHtml("bad")}</div>
+      <p class="rec-what">${esc(c.condition ? condition(c.condition) : "Something looks wrong")}${c.summary ? `. ${esc(c.summary)}` : "."}</p>
+      <dl class="facts">
+        ${row("Where", esc([where, share].filter(Boolean).join(" ")))}
+        ${row("Why we think so", esc(why))}
+        ${row("How sure we are", esc(sure))}
+        ${row("At stake", imp ? `<strong>${esc(FW.usd(imp.low_usd))} to ${esc(FW.usd(imp.high_usd))}</strong> if nothing is done${imp.affected_acres ? ` (about ${esc(Math.round(imp.affected_acres))} acres)` : ""}` : "")}
+        ${row("Next step", a && a.summary ? `${esc(a.summary)}${ACTION_WORD[type] ? ` <span class="quiet">(${esc(ACTION_WORD[type])})</span>` : ""}` : "")}
+        ${row("Where it stands", stateWord ? `<strong class="st-${st}">${esc(stateWord)}</strong>` : "")}
+      </dl><div class="actions">`;
+    if (st === "waiting") h += `<a class="btn primary" href="#text" data-go="text">Reply YES in Text</a>`;
+    h += `<button class="btn secondary" type="button" data-ask="${esc(f.id)}" ${askBusy ? "disabled" : ""}>${askBusy === f.id ? "Asking..." : "Ask about this field"}</button>`;
+    h += `<button class="linkbtn" type="button" data-show="${esc(f.id)}">Show on map</button>`;
+    h += `</div>`;
+    const links = [i.reportUrl ? `<a href="${esc(i.reportUrl)}">Read the full report</a>` : "", i.workUrl ? `<a href="${esc(i.workUrl)}">Open the work order</a>` : ""].filter(Boolean).join("");
+    if (links) h += `<div class="links">${links}</div>`;
+    return h + `</article>`;
+  }
+  function renderRecs() {
+    const fs = fieldsOf(), el = $("plotRecs");
+    if (!fs.length) { setHtml(el, `<h1 class="display">Latest check</h1><p class="empty">No fields yet. <button class="linkbtn" type="button" data-go="draw">Draw your first one.</button></p>`); return; }
+    const dates = fs.map(lastPass).filter(Boolean).sort();
+    const latest = dates[dates.length - 1];
+    const urgent = [], busy = [], calm = [], waiting = [];
+    fs.forEach((f) => {
+      const t = fieldTone(f), i = t === "bad" ? bestInv(f) : null;
+      if (i) urgent.push({ f, i }); else if (t === "busy") busy.push(f); else if (t === "wait") waiting.push(f); else calm.push(f);
+    });
+    const rank = (x) => ({ waiting: 0, approved: 1, declined: 2, none: 3 }[recState(x.i)]);
+    const money = (x) => (x.i.concluded.impact && x.i.concluded.impact.high_usd) || 0;
+    urgent.sort((a, b) => rank(a) - rank(b) || money(b) - money(a));
+    const n = urgent.length;
+    let h = `<h1 class="display">Latest check</h1>
+      <p class="lead">${latest ? `Most recent satellite pass: <strong>${esc(passDate(latest))}</strong>. ` : "No clear satellite pass yet. "}${n ? `${n === 1 ? "One field needs" : n + " fields need"} your attention.` : latest ? "Nothing needs your attention." : "We will check again when the sky is clear."}</p>`;
+    if (n) h += `<h2 class="section">${n === 1 ? "What to do" : "What to do, most urgent first"}</h2>` + urgent.map((x) => recHtml(x.f, x.i)).join("");
+    const quiet = [];
+    busy.forEach((f) => quiet.push(`<li><strong>${esc(f.name)}</strong> <span class="quiet">We are checking this one more closely now.</span></li>`));
+    waiting.forEach((f) => quiet.push(`<li><strong>${esc(f.name)}</strong> <span class="quiet">Waiting for a clear satellite pass.</span></li>`));
+    calm.forEach((f) => quiet.push(`<li><strong>${esc(f.name)}</strong> <span class="quiet">Looks healthy${lastPass(f) ? ` as of ${esc(passDate(lastPass(f)))}` : ""}.</span></li>`));
+    if (quiet.length) h += `${n ? `<h2 class="section">No action needed</h2>` : ""}<ul class="calm">${quiet.join("")}</ul>`;
+    setHtml(el, h);
+  }
+  function renderLegend() {
+    const order = ["bad", "busy", "", "wait"], tones = [...new Set(fieldsOf().map(fieldTone))].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+    setHtml($("mapLegend"), tones.map((t) => statusHtml(t)).join(""));
+  }
   function renderPlots() {
+    renderRecs(); renderLegend();
     const el = $("plotList");
     const a = document.activeElement;
     if (el.contains(a) && a.matches("input,select")) { deferPlots = true; return; }
@@ -504,15 +632,18 @@
   async function editAction(f, label, fn, okText) {
     saving = true; plotMsg = { id: f.id, text: label, tone: "" }; schedule();
     try {
+      const idx = fieldsOf().findIndex((x) => x.id === f.id);
       const r = await fn();
-      if (r && r.fields) applyFarm(r); else if (!demo) await refresh();
+      if (r) applyEdited(r);
+      if (selected === f.id && !fieldsOf().some((x) => x.id === f.id) && okText && fieldsOf()[idx]) { selected = fieldsOf()[idx].id; f = fieldsOf()[idx]; }
       plotMsg = okText ? { id: f.id, text: okText, tone: "" } : null;
     } catch (e) { plotMsg = { id: f.id, text: e.message, tone: e.code === "UNAVAILABLE" ? "" : "bad" }; }
     finally { saving = false; schedule(); }
   }
-  $("plotList").addEventListener("click", async (e) => {
+  $("v-plots").addEventListener("click", async (e) => {
     const t = e.target;
     const sel = t.closest("[data-sel]"); if (sel) return select(sel.dataset.sel);
+    const show = t.closest("[data-show]"); if (show) { select(show.dataset.show, true); $("mapSlot").scrollIntoView({ block: "nearest", behavior: "smooth" }); return; }
     const f = (id) => fieldsOf().find((x) => x.id === id);
     let b;
     if ((b = t.closest("[data-ask]"))) {
@@ -580,7 +711,7 @@
       }
       l.poly.setStyle({ color: col, weight: isSel ? 5 : 3, fillOpacity: isSel ? 0.3 : 0.2, opacity: hide ? 0 : 1, fillColor: col });
       l.halo.setStyle({ opacity: hide ? 0 : 0.85, weight: isSel ? 9 : 7 });
-      l.poly.setTooltipContent(`${esc(f.name)}: ${esc(TONE_WORD[tone])}`);
+      l.poly.setTooltipContent(esc(f.name));
     });
     if (fitNext && Object.keys(layers).length && (tab === "plots" || tab === "draw")) fitFields();
   }
@@ -714,15 +845,17 @@
     if (up === "ASK") return runDemo();
     const say = up === "YES" ? "Done. I sent the repair ticket to your brother with a map pin." : up === "NO" ? "Okay, I will not send anything." : up === "MORE" ? "The weak area is a ring on the outer edge, where the pivot's last span runs. Rain, hail and soil were checked and ruled out." : "Got it.";
     await new Promise((r) => setTimeout(r, 400));
+    if (up === "YES" || up === "NO") { const i = [...invs.values()].find((x) => x.concluded); if (i) onFeed({ type: "action_created", ts: new Date().toISOString(), farm_id: "demo", investigation_id: i.id, payload: { status: up === "YES" ? "approved" : "declined", summary: up === "YES" ? "Repair ticket sent." : "You said no." } }); }
     onFeed({ type: "message_out", ts: new Date().toISOString(), farm_id: "demo", payload: { body: say } });
   }
   let demoTimers = [];
-  async function runDemo() {
+  async function runDemo(instant) {
     demoTimers.forEach(clearTimeout); demoTimers = [];
     invs.clear(); Object.keys(fieldState).forEach((k) => delete fieldState[k]);
     const script = await FW.loadFixture("feed_replay.json");
     const speed = Number(params.get("speed")) || 1;
-    script.forEach((s) => demoTimers.push(setTimeout(() => onFeed(s.msg), s.at_ms / speed)));
+    if (instant === true) script.forEach((s) => onFeed(s.msg)); // everything already happened: Plots shows the finished recommendation at once
+    else script.forEach((s) => demoTimers.push(setTimeout(() => onFeed(s.msg), s.at_ms / speed)));
     schedule();
   }
 
@@ -732,7 +865,7 @@
     if (demo) {
       farm = await FW.loadFixture("farm.json"); farmId = farm.farm_id;
       thread = (farm.thread || []).map((m) => ({ who: m.who, text: m.text, at: m.at, kind: "seed" }));
-      enterLive(); mode = "poll"; renderFeedStatus(); route(); schedule(); setTimeout(runDemo, 800);
+      enterLive(); mode = "poll"; renderFeedStatus(); route(); schedule(); setTimeout(() => runDemo(!params.get("speed") && params.get("replay") !== "1"), 300);
       return;
     }
     farmId = params.get("farm");

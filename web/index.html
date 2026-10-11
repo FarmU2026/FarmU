@@ -81,16 +81,22 @@
       </div>
     </section>
 
-    <!-- PLOTS -->
-    <section class="side" id="v-plots" role="tabpanel" aria-labelledby="tab-plots">
-      <button class="grab" type="button" aria-label="Resize this panel"><span></span></button>
-      <div class="side-in">
-        <h1 class="display">Your plots</h1>
-        <div id="plotList"></div>
-        <div class="foot">
-          <button class="btn secondary" id="btnCheck" type="button">Check satellite now</button>
-          <p class="meta" id="checked"></p>
-          <p class="err" id="checkMsg" role="status"></p>
+    <!-- PLOTS: latest check and recommendations first, small map, then the field list -->
+    <section class="page plotspage" id="v-plots" role="tabpanel" aria-labelledby="tab-plots">
+      <div class="plots-grid">
+        <div class="p-recs" id="plotRecs"></div>
+        <aside class="p-map" aria-label="Map of your fields">
+          <div class="mapslot" id="mapSlot"></div>
+          <p class="legend" id="mapLegend"></p>
+        </aside>
+        <div class="p-fields">
+          <h2 class="section">Your fields</h2>
+          <div id="plotList"></div>
+          <div class="foot">
+            <button class="btn secondary" id="btnCheck" type="button">Check satellite now</button>
+            <p class="meta" id="checked"></p>
+            <p class="err" id="checkMsg" role="status"></p>
+          </div>
         </div>
       </div>
     </section>

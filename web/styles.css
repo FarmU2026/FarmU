@@ -262,3 +262,39 @@ details[open] > .invsum::after { content: "Hide"; }
 .toggle input { width: 28px; height: 28px; min-height: 0; }
 #wmap { height: 300px; background: var(--line); }
 details summary { cursor: pointer; min-height: 32px; }
+
+/* ---------- plots: latest check, recommendations, small map, field list ---------- */
+.plots-grid { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) 340px; grid-template-areas: "recs map" "fields map"; column-gap: 48px; align-items: start; }
+.p-recs { grid-area: recs; } .p-fields { grid-area: fields; } .p-map { grid-area: map; position: sticky; top: 0; }
+.mapslot { position: relative; height: 300px; isolation: isolate; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.mapslot .mapwrap { position: absolute; inset: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 8px; min-height: 24px; }
+.lead strong { color: var(--ink); }
+.p-recs .lead { color: var(--muted); }
+.rec { border-top: 1px solid var(--line); padding: 24px 0; }
+.rec-top { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.rec h3 { font-size: 22px; line-height: 28px; font-weight: 650; }
+.rec-what { font-size: 20px; line-height: 29px; font-weight: 600; margin-top: 8px; }
+.facts { margin: 16px 0 0; }
+.facts > div { display: grid; grid-template-columns: 148px minmax(0, 1fr); gap: 4px 16px; padding: 8px 0; }
+.facts dt { font-size: 15px; line-height: 27px; font-weight: 500; color: var(--muted); }
+.facts dd { margin: 0; }
+.st-waiting { color: var(--warn); } .st-approved { color: var(--accent); } .st-declined { color: var(--muted); }
+.links.pl { margin-top: 4px; }
+.calm { list-style: none; margin: 8px 0 0; padding: 0; }
+.calm li { padding: 12px 0; border-top: 1px solid var(--line); }
+.calm li:last-child { border-bottom: 1px solid var(--line); }
+.p-fields .section { margin-top: 48px; }
+.editgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.p-fields .rowbtn { padding-left: 0; padding-right: 0; }
+.p-fields li.sel > .rowbtn { padding-left: 16px; }
+.p-fields .detail { padding-left: 16px; padding-right: 0; }
+@media (max-width: 999px) {
+  .plots-grid { display: block; }
+  .p-map { position: static; margin-top: 32px; }
+  .mapslot { height: 240px; }
+  .p-fields .section { margin-top: 32px; }
+  .facts > div { grid-template-columns: 1fr; gap: 0; padding: 8px 0; }
+  .facts dt { line-height: 22px; }
+}
+@media (max-width: 420px) { .editgrid { grid-template-columns: 1fr; } }
