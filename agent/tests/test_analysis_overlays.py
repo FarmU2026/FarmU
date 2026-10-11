@@ -104,8 +104,17 @@ def test_change_is_nan_where_either_pass_is_invalid():
 # ---------- detection is unchanged (goldens recorded on main before the overlays existed) ----------
 
 
+def _detection_only(o):
+    """Drop descriptive fields added after the goldens were recorded (a region's `where` is words, not detection)."""
+    if isinstance(o, dict):
+        return {k: _detection_only(v) for k, v in o.items() if k != "where"}
+    if isinstance(o, list):
+        return [_detection_only(v) for v in o]
+    return o
+
+
 def digest(obj) -> str:
-    return hashlib.sha256(json.dumps(obj, sort_keys=True).encode()).hexdigest()[:16]
+    return hashlib.sha256(json.dumps(_detection_only(obj), sort_keys=True).encode()).hexdigest()[:16]
 
 
 def test_core_detection_unchanged():
@@ -209,3 +218,9 @@ def test_live_demo_box_overlays(tmp_path):
     for kind in ("departure", "change", "normal"):
         img = decode((tmp_path / getattr(res.overlays, kind).key).read_bytes())
         assert img[..., 3].max() > 0 and len({tuple(p) for p in img.reshape(-1, 4)}) > 10
+
+
+def test_region_where_is_computed_from_lon_lat():
+    patch = np.hypot(YY - 30, XX - 60) < 8
+    r = run(current(patch=patch, drop=0.2))
+    assert r.anomaly.regions[0].where and r.anomaly.regions[0].where.endswith("of the field")
