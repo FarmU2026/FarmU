@@ -20,6 +20,7 @@ from .grid import Grid, IndexStack, Layers, Pivot, SceneData
 from .indices import compute_indices
 from .layers import LayerProvider, build_layers
 from .loader import SceneLoader, StacLoader
+from .pivot import resolve_pivot
 from .writer import NullWriter, OverlayWriter
 
 LOOKBACK_DAYS = 30
@@ -169,7 +170,7 @@ def _analyze(req: C.FieldAnalysisRequest, loader: SceneLoader, writer: OverlayWr
         previous = pf.result()
         history = [s for s in (f.result() for f in sf) if s is not None]
 
-    core = analyze_stacks(cur, history, previous, crop=req.crop, pivot=Pivot.from_request(req.pivot),
+    core = analyze_stacks(cur, history, previous, crop=req.crop, pivot=resolve_pivot(req.pivot, req.polygon),
                           layers=layers, z_threshold=req.z_threshold, min_region_acres=req.min_region_acres)
 
     prefix = f"analysis/{req.field.field_id}/{chosen.isoformat()}/s2/"
