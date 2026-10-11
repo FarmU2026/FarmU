@@ -56,6 +56,8 @@ def build_baseline(*, field_id: str, polygon: list[list[float]], tile_ids: list[
                    bucket: str | None, as_of: date | str | None = None, loader: SceneLoader | None = None,
                    writer: OverlayWriter | None = None, seasons: int = PRIOR_SEASONS) -> C.FieldBaseline:
     """Compute and store the baseline. Raises on real failures (loader/network/writer errors)."""
+    if len(polygon) < 3:
+        raise ValueError(f"baseline {field_id}: polygon needs at least 3 lon/lat points")
     if writer is None:
         writer = S3Writer(bucket) if bucket else NullWriter()
     loader = loader or StacLoader()
