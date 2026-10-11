@@ -110,7 +110,11 @@ def decide_field(event: dict) -> dict:
         "overlays": result.overlays.model_dump(mode="json") if result.overlays else None,
         "analysis_key": result.analysis_key, "emit": decision.emit, "reason": decision.reason,
         "anomaly_id": decision.anomaly_id, "open_watch_ids": request.open_watch_ids,
+        # The analyzer reports its own failures as data (status "error" + error detail); keep the detail.
+        "error": result.error.model_dump(mode="json") if result.error else None,
     })
+    if result.error:
+        log.error("analyzer error for %s on %s: %s", ref.field_id, scene["scene_id"], result.error.message)
     out: dict[str, Any] = {"field_id": ref.field_id, "status": result.status, "emit": decision.emit,
                            "reason": decision.reason}
     if not stored:
