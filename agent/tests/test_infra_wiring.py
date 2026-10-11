@@ -60,9 +60,63 @@ def test_monitoring_alarms_on_every_dlq_and_publishes_to_an_unsubscribed_topic(a
     t = _template(app, "FieldWatch-Monitoring")
     alarms = t.find_resources("AWS::CloudWatch::Alarm")
     dlq = [a for a in alarms.values() if a["Properties"]["MetricName"] == "ApproximateNumberOfMessagesVisible"]
-    assert len(dlq) == 4
+    assert len(dlq) == 5  # scenes, session starter, notifications, projector, hail
     assert any(a["Properties"]["MetricName"] == "Errors" for a in alarms.values())
     assert any(a["Properties"]["MetricName"] == "ExecutionsFailed" for a in alarms.values())
     t.resource_count_is("AWS::SNS::Topic", 1)
     t.resource_count_is("AWS::SNS::Subscription", 0)
     t.resource_count_is("AWS::CloudWatch::Dashboard", 1)
+
+
+def test_api_stage_is_throttled_with_tighter_limits_on_costly_routes(app):
+    t = _template(app, "FieldWatch-Api")
+    (stage,) = t.find_resources("AWS::ApiGatewayV2::Stage").values()
+    props = stage["Properties"]
+    assert props["DefaultRouteSettings"] == {"ThrottlingRateLimit": 25, "ThrottlingBurstLimit": 50}
+    rs = props["RouteSettings"]
+    assert rs["POST /v1/replay"] == {"ThrottlingRateLimit": 1, "ThrottlingBurstLimit": 2}
+    assert rs["POST /v1/replay/reset"] == {"ThrottlingRateLimit": 1, "ThrottlingBurstLimit": 2}
+    for key in ("POST /api/farms", "POST /api/farms/{farm_id}/check",
+                "POST /api/farms/{farm_id}/fields/{field_id}/ask"):
+        assert rs[key] == {"ThrottlingRateLimit": 2, "ThrottlingBurstLimit": 5}, key
+    # every throttled key is a real route of the API (an unknown key would fail the deploy)
+    routes = {r["Properties"]["RouteKey"] for r in t.find_resources("AWS::ApiGatewayV2::Route").values()}
+    assert set(rs) <= routes
+
+
+def _reserved(app, stack):
+    """{function logical-id prefix or FunctionName: ReservedConcurrentExecutions or None} for a stack's Lambdas."""
+    out = {}
+    for lid, f in _template(app, stack).find_resources("AWS::Lambda::Function").items():
+        p = f["Properties"]
+        out[p.get("FunctionName", lid)] = p.get("ReservedConcurrentExecutions")
+    return out
+
+
+def test_cost_heavy_lambdas_have_reserved_concurrency(app):
+    api = _reserved(app, "FieldWatch-Api")
+    assert api and set(api.values()) == {10}  # every route-group Lambda
+    assert set(_reserved(app, "FieldWatch-Agent").values()) == {5}  # the session starter
+    scenes = _reserved(app, "FieldWatch-Scenes")
+    assert scenes["fw-scene-analyze-field"] == 10
+    notify = _reserved(app, "FieldWatch-Notifications")
+    assert notify["fw-notify-send"] == 5
+    assert notify["fw-notify-reply"] is None and notify["fw-notify-mirror"] is None
+
+
+def test_total_reserved_concurrency_stays_well_under_the_account_limit(app):
+    total = sum(v or 0 for s in app.node.children if hasattr(s, "template_options")
+                for v in _reserved(app, s.node.id).values())
+    assert 0 < total < 100
+
+
+def test_monitoring_alarms_on_the_hazards_and_notification_lambdas(app):
+    """Kurt's functions: hail filter + drought poller (hazards), send + reply + mirror (notifications)."""
+    t = _template(app, "FieldWatch-Monitoring")
+    alarms = t.find_resources("AWS::CloudWatch::Alarm")
+    errors = [lid for lid, a in alarms.items() if a["Properties"]["MetricName"] == "Errors"]
+    for name in ("HailFilter", "DroughtPoller", "NotifySend", "NotifyReply", "NotifyMirror"):
+        (lid,) = [e for e in errors if e.startswith(name + "Errors")]
+        props = alarms[lid]["Properties"]
+        assert props["Threshold"] == 0 and props["Period"] == 300 and props["AlarmActions"], name
+    assert any(lid.startswith("HailDlqNotEmpty") for lid in alarms)

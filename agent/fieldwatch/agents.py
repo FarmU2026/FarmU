@@ -246,12 +246,12 @@ def pool_from_tools(tools: list | None) -> dict | None:
 # ---------------------------------------------------------------- specialists
 
 
-def _specialist(name: str, tools: list, timeline: ToolTimeline) -> Agent:
+def _specialist(name: str, tools: list, timeline: ToolTimeline, hooks: list | None = None) -> Agent:
     return Agent(
         name=name,
         model=model(),
         tools=tools,
-        hooks=[timeline],
+        hooks=[timeline, *(hooks or [])],
         callback_handler=None,
         structured_output_model=C.SpecialistResponse,
         system_prompt=(
@@ -296,11 +296,13 @@ def run_specialist(agent: Agent, name: str, question: str, ledger: EvidenceLedge
     return out.model_dump(mode="json")
 
 
-def build_specialists(timeline: ToolTimeline, ledger: EvidenceLedger | None = None, tools: list | None = None) -> list:
-    """Each specialist becomes a tool the supervisor can call. `tools` are Gateway tools; default is local."""
+def build_specialists(timeline: ToolTimeline, ledger: EvidenceLedger | None = None, tools: list | None = None,
+                      hooks: list | None = None) -> list:
+    """Each specialist becomes a tool the supervisor can call. `tools` are Gateway tools; default is local.
+    `hooks` (e.g. one shared TokenBudget) are added to every specialist."""
     ledger = ledger if ledger is not None else EvidenceLedger()
     pool = pool_from_tools(tools)
-    agents = {n: _specialist(n, _pick(names, pool), timeline) for n, names in SPECIALIST_TOOLS.items()}
+    agents = {n: _specialist(n, _pick(names, pool), timeline, hooks) for n, names in SPECIALIST_TOOLS.items()}
 
     def ask(name: str, question: str, field_id: str) -> str:
         q = question if not field_id else f"Field id: {field_id}. {question}"
@@ -513,9 +515,11 @@ def build_supervisor(
     tools: list | None = None,
     context: dict | None = None,
     investigation_id: str | None = None,
+    hooks: list | None = None,
 ) -> Agent:
     """The supervisor with its specialists.
 
+    hooks: extra hook providers for the supervisor and every specialist (one shared TokenBudget per investigation).
     tools: Gateway read tools (workstream 6, `toolset.tools_for(...)`) to use in place of the local ones, matched by
            bare tool name; any name they lack falls back to the local tool. tools=None is the all-local default.
            Write tools always stay local (they interrupt for a YES).
@@ -534,9 +538,9 @@ def build_supervisor(
     return Agent(
         name="supervisor",
         model=supervisor_model(),
-        tools=build_specialists(timeline, ledger, tools) + _pick(SUPERVISOR_READ_TOOLS, pool)
+        tools=build_specialists(timeline, ledger, tools, hooks) + _pick(SUPERVISOR_READ_TOOLS, pool)
         + build_scoring_tools(ledger, context) + write + T.MESSAGE_TOOLS,
-        hooks=[timeline, DiagnosisGuard()],
+        hooks=[timeline, DiagnosisGuard(), *(hooks or [])],
         callback_handler=None,
         session_manager=session_manager,
         system_prompt=SUPERVISOR_PROMPT,

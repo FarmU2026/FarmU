@@ -4,8 +4,9 @@ When the notify lane is deployed (FIELDWATCH_NOTIFY_REPLY_FN = fw-notify-reply),
 is forwarded unchanged to WS9's webhook handler (it verifies the signature, dedupes and answers with TwiML);
 its response is returned as is. Otherwise this module's own minimal path runs:
 
-1. Verify X-Twilio-Signature with the auth token from SSM /fieldwatch/twilio-auth-token. If that
-   parameter doesn't exist yet, verification is skipped (logged) so the demo isn't blocked.
+1. Verify X-Twilio-Signature with the auth token from SSM /fieldwatch/twilio-auth-token. Verification is
+   mandatory: a missing or wrong signature is a 403, and so is a missing token parameter (fail closed), unless
+   FIELDWATCH_ALLOW_UNSIGNED_SMS=1 (local dev only: never set it on a deployed function).
 2. Dedupe on MessageSid (fw-idempotency, key "sms-in#<sid>", 7-day TTL).
 3. Hand off to the reply handler (cloud/api/_reply.py fallback).
 4. Answer with empty TwiML; replies go out through the send path, never inline.
@@ -29,6 +30,7 @@ from ._http import Request, Response, Router, log
 router = Router("sms")
 handler = router.handler
 
+ALLOW_UNSIGNED_ENV = "FIELDWATCH_ALLOW_UNSIGNED_SMS"  # "1" skips verification when no auth token exists (local dev)
 TWIML_EMPTY = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>'
 
 
@@ -77,11 +79,15 @@ def inbound(req: Request):
     if token:
         given = req.headers.get("x-twilio-signature", "")
         want = twilio_signature(token, public_url(req), form)
-        if not hmac.compare_digest(given, want):
+        if not hmac.compare_digest(given.encode(), want.encode()):  # bytes: a non-ASCII header must not raise
             log.warning("bad Twilio signature for %s", public_url(req))
             return Response(status=403, raw="forbidden")
+    elif os.getenv(ALLOW_UNSIGNED_ENV) == "1":
+        log.warning("SSM %s not set and %s=1: Twilio signature NOT verified", _param_name(), ALLOW_UNSIGNED_ENV)
     else:
-        log.warning("SSM %s not set: Twilio signature NOT verified", _param_name())
+        log.error("SSM %s not set: rejecting inbound SMS (create the parameter, or set %s=1 for local dev only)",
+                  _param_name(), ALLOW_UNSIGNED_ENV)
+        return Response(status=403, raw="forbidden")
 
     frm, body, sid = form.get("From"), form.get("Body"), form.get("MessageSid") or form.get("SmsSid")
     if not frm or body is None:

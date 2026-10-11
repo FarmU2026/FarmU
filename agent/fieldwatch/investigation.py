@@ -25,7 +25,7 @@ from . import config, interfaces, memory
 from . import contracts as C
 from .agents import build_supervisor
 from .config import SESSIONS
-from .hooks import ToolTimeline, print_event
+from .hooks import TokenBudget, ToolTimeline, print_event
 from .schemas import Diagnosis
 
 log = logging.getLogger(__name__)
@@ -83,11 +83,12 @@ def _gateway_tools():
 def _build(timeline: ToolTimeline, sm):
     """build_supervisor with Gateway tools when it can take them (agents.py needs a `tools` parameter)."""
     tools = _gateway_tools()
+    budget = TokenBudget()  # one per investigation run, shared by the supervisor and its specialists
     if tools is not None and "tools" in inspect.signature(build_supervisor).parameters:
-        return build_supervisor(timeline, session_manager=sm, tools=tools)
+        return build_supervisor(timeline, session_manager=sm, tools=tools, hooks=[budget])
     if tools is not None:
         log.warning("build_supervisor has no `tools` parameter yet; running with its built-in tools")
-    return build_supervisor(timeline, session_manager=sm)
+    return build_supervisor(timeline, session_manager=sm, hooks=[budget])
 
 
 def _to_step(result, timeline: ToolTimeline, approved: bool | None = None) -> Step:
