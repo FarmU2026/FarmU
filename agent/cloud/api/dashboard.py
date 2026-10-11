@@ -16,14 +16,13 @@ import hmac
 import os
 from datetime import datetime, timezone
 
-from boto3.dynamodb.conditions import Key
 from pydantic import BaseModel, Field
 
 from fieldwatch import contracts as C
 from fieldwatch import links
 from fieldwatch.interfaces import OPEN_INVESTIGATION_STATUSES, Env, Ssm
 
-from . import _auth, _aws, _jobs, _reply, store
+from . import _auth, _aws, _diagnoses, _jobs, _reply, store
 from ._http import ApiError, Request, Response, Router
 
 router = Router("dashboard")
@@ -55,9 +54,7 @@ def auth_dashboard(req: Request):
 
 
 def _recent_investigations(field_id: str, limit: int = 10) -> list[dict]:
-    page = _aws.table("investigations").query(IndexName="by-field", KeyConditionExpression=Key("field_id").eq(field_id),
-                                              ScanIndexForward=False, Limit=limit)
-    return [_aws.from_ddb(i) for i in page.get("Items", [])]
+    return _diagnoses.recent_investigations(field_id, limit)
 
 
 @router.route("GET", "/v1/farms/{farm_id}/overview")
