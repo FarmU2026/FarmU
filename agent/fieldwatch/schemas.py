@@ -1,15 +1,40 @@
 """Typed outputs. The text message, the web page and the dollar figure all come from one object."""
+import re
+
 from pydantic import BaseModel, Field
 
+from . import contracts as C
 from .contracts import ConditionId, Hypothesis
 
 
-class SpecialistResponse(BaseModel):
-    specialist: str = Field(description="imagery, weather, or soil")
-    finding: str = Field(description="One or two plain sentences, no jargon")
-    supports: list[str] = Field(default_factory=list, description="Hypotheses this evidence supports")
-    rules_out: list[str] = Field(default_factory=list, description="Hypotheses this evidence rules out")
-    confidence: float = Field(ge=0, le=1)
+# The plan's specialist contract lives in contracts.py (agent, evidence items, notes, tool_calls).
+# Re-exported so `from fieldwatch.schemas import SpecialistResponse` keeps working.
+SpecialistResponse = C.SpecialistResponse
+
+PRETTY_SURE = 0.8  # scorer probability at or above which we say "pretty sure"
+FAIRLY_SURE = 0.55
+
+
+def how_sure_phrase(top_probability: float) -> str:
+    """Plain-words certainty, derived from the scorer's top probability. The LLM never picks this."""
+    if top_probability >= PRETTY_SURE:
+        return "pretty sure"
+    if top_probability >= FAIRLY_SURE:
+        return "fairly sure"
+    return "not sure, need a photo"
+
+
+_PERCENT = re.compile(r"(?:\b(?:about|roughly|around|nearly|almost)\s+|~\s*)?(\d+(?:\.\d+)?)\s?(?:%|percent\b)", re.I)
+
+
+def scrub_percentages(text: str, allowed: set[int]) -> str:
+    """Remove any percentage the scorer did not produce. `allowed` holds whole-number percents from score results."""
+
+    def drop(m: re.Match) -> str:
+        return m.group(0) if round(float(m.group(1))) in allowed else ""
+
+    out = _PERCENT.sub(drop, text)
+    return re.sub(r"\s{2,}", " ", out).replace(" .", ".").replace(" ,", ",").strip()
 
 
 class Diagnosis(BaseModel):
@@ -25,7 +50,7 @@ class Diagnosis(BaseModel):
         description="One of: repair_work_order, scouting_pin, request_photo, insurance_notice, none"
     )
     action_detail: str = Field(description="What the person doing the action should check or do")
-    # --- interfaces repair (B5): what InvestigationConcluded needs. Optional, so older outputs still validate.
+    # --- interfaces repair: what InvestigationConcluded needs. Optional, so older outputs still validate.
     condition: ConditionId | None = Field(default=None, description="The likely condition id from the catalog")
     affected_acres: float | None = Field(default=None, description="Acres the dollar range was estimated on")
     hypotheses: list[Hypothesis] = Field(

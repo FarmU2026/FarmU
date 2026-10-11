@@ -148,7 +148,7 @@ def _now() -> str:
 
 
 # ToolTimeline agent names -> contract AgentName (the plan renames the specialists)
-_AGENT = {"supervisor": "supervisor", "imagery": "imagery", "weather": "environment", "soil": "agronomy"}
+_AGENT = {"supervisor": "supervisor", "imagery": "imagery", "environment": "environment", "agronomy": "agronomy"}
 _PLAIN = {
     "list_fields": "Looking up the fields",
     "look_at_field": "Looking at the latest satellite pass",
@@ -156,9 +156,19 @@ _PLAIN = {
     "get_weather": "Checking recent weather",
     "get_soil": "Checking the soil",
     "estimate_loss": "Estimating what is at stake",
+    "get_hail": "Checking for hail",
+    "get_drought": "Checking drought conditions",
+    "get_soil_profile": "Checking the soil",
+    "get_field_context": "Reading the field's history",
+    "get_disease_reports": "Checking disease and pest reports",
+    "analyze_field": "Reading the satellite check results",
+    "precheck_evidence": "Checking what we already know",
+    "score_hypotheses": "Weighing the evidence",
+    "estimate_impact": "Estimating what is at stake",
+    "send_farmer_message": "Sending a text",
     "ask_imagery": "Asking the satellite specialist",
-    "ask_weather": "Asking the weather specialist",
-    "ask_soil": "Asking the soil specialist",
+    "ask_environment": "Asking the weather and soil specialist",
+    "ask_agronomy": "Asking the crop health specialist",
     "create_work_order": "Preparing a repair ticket",
     "create_scout_pin": "Preparing a scouting pin",
     "request_photo": "Preparing a photo request",

@@ -231,11 +231,22 @@ def test_notify_decision_adapter_maps_names_and_does_not_double_emit(tmp_path, m
 # ---------- agents.py tools= (investigation passes toolset.tools_for(...)) ----------
 
 
-def test_supervisor_takes_tools_by_name_and_keeps_local_write_tools():
+def test_supervisor_takes_read_tools_by_name_and_keeps_local_write_tools(monkeypatch):
     from fieldwatch import agents, toolset
     from fieldwatch import tools as T
+    from fieldwatch.hooks import ToolTimeline
 
+    monkeypatch.setattr(agents, "model", lambda: object())
     remote = toolset.local_tools(names=["get_weather"])  # stands in for the Gateway's copy
-    picked = agents._pick(remote, T.list_fields, T.get_weather)
-    assert picked[0] is T.list_fields and picked[1] is remote[0]
-    assert agents._pick(None, T.list_fields) == [T.list_fields]
+    pool = agents.pool_from_tools(remote)
+    picked = agents._pick(["list_fields", "get_weather"], pool)
+    assert picked[0] is agents.local_tool_pool()["list_fields"] and picked[1] is remote[0]
+    assert agents._pick(["list_fields"], None) == [agents.local_tool_pool()["list_fields"]]
+
+    # write tools and send_farmer_message are always the local ones, even if the pool offers same-named tools
+    seen = {}
+    monkeypatch.setattr(agents, "Agent", lambda **kw: seen.update(kw) or object())
+    agents.build_supervisor(ToolTimeline(lambda e: None), tools=remote)
+    names = {getattr(t, "tool_name", None) for t in seen["tools"]}
+    assert {"create_work_order", "create_scout_pin", "request_photo", "send_farmer_message"} <= names
+    assert all(any(t is w for t in seen["tools"]) for w in T.WRITE_TOOLS + T.MESSAGE_TOOLS)
