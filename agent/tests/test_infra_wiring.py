@@ -66,3 +66,19 @@ def test_monitoring_alarms_on_every_dlq_and_publishes_to_an_unsubscribed_topic(a
     t.resource_count_is("AWS::SNS::Topic", 1)
     t.resource_count_is("AWS::SNS::Subscription", 0)
     t.resource_count_is("AWS::CloudWatch::Dashboard", 1)
+
+
+def test_api_stage_is_throttled_with_tighter_limits_on_costly_routes(app):
+    t = _template(app, "FieldWatch-Api")
+    (stage,) = t.find_resources("AWS::ApiGatewayV2::Stage").values()
+    props = stage["Properties"]
+    assert props["DefaultRouteSettings"] == {"ThrottlingRateLimit": 25, "ThrottlingBurstLimit": 50}
+    rs = props["RouteSettings"]
+    assert rs["POST /v1/replay"] == {"ThrottlingRateLimit": 1, "ThrottlingBurstLimit": 2}
+    assert rs["POST /v1/replay/reset"] == {"ThrottlingRateLimit": 1, "ThrottlingBurstLimit": 2}
+    for key in ("POST /api/farms", "POST /api/farms/{farm_id}/check",
+                "POST /api/farms/{farm_id}/fields/{field_id}/ask"):
+        assert rs[key] == {"ThrottlingRateLimit": 2, "ThrottlingBurstLimit": 5}, key
+    # every throttled key is a real route of the API (an unknown key would fail the deploy)
+    routes = {r["Properties"]["RouteKey"] for r in t.find_resources("AWS::ApiGatewayV2::Route").values()}
+    assert set(rs) <= routes
