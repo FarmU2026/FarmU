@@ -7,18 +7,22 @@ three specialists, and text the farmer in plain words. Every action waits for a 
 
 | Path | What |
 | --- | --- |
-| `fieldwatch/agents.py` | Supervisor + imagery/weather/soil specialists (agents-as-tools) |
-| `fieldwatch/tools.py` | Read tools (fixture-backed today) and write tools that **interrupt** for approval |
-| `fieldwatch/hooks.py` | `ToolTimeline` hook: evidence cards for the dashboard, write-tool guard |
-| `fieldwatch/schemas.py` | `Diagnosis` structured output; `to_text()` is the SMS |
-| `fieldwatch/investigation.py` | `start()` pauses on the interrupt, `reply()` resumes from a file session |
+| `fieldwatch/agents.py` | Supervisor + satellite, weather & soil, and crop-health specialists (agents-as-tools); scoring tools; `DiagnosisGuard` |
+| `fieldwatch/tools.py` | Local read tools and the write tools that **interrupt** for the farmer's approval |
+| `fieldwatch/toolset.py` | Gateway (MCP) tools for the agents in AWS |
+| `fieldwatch/hooks.py` | `ToolTimeline` (live progress), `TokenBudget` |
+| `fieldwatch/investigation.py` | Runs an investigation: `start()` pauses on the interrupt, `reply()` resumes (S3 sessions on Runtime, file sessions locally); question runs for chat |
+| `fieldwatch/analysis/` | Satellite field analyzer (see `CALIBRATION.md`) |
+| `fieldwatch/scoring.py`, `catalog/` | Deterministic hypothesis scorer, condition catalog, impact tables |
+| `fieldwatch/context/`, `hazards/`, `notify/` | Field context data, hail and drought, notifications |
+| `fieldwatch/contracts.py`, `interfaces.py` | Shared contracts and cross-workstream interfaces |
+| `cloud/` | Lambda handlers, Gateway and the AgentCore Runtime project |
 | `app.py` | AgentCore Runtime entrypoint |
-| `fixtures/demo_farm.json` | The demo farm: north pivot, Johnson quarter, east 80 |
-| `tests/test_smoke.py` | Whole loop with a fake model, no AWS needed |
+| `web/server.py` | Local dev harness (FastAPI); the deployed UI is in `../web/` |
+| `tests/` | Test suite; `tests/test_smoke.py` runs the whole loop with a fake model, no AWS needed |
 
-Strands features on show: agents-as-tools, interrupts (human-in-the-loop), hooks,
-structured output, session management, per-invocation limits. Next up: Graph for the
-investigation, bidirectional streaming (Nova Sonic) for Grandpa's phone call.
+Strands features on show: agents-as-tools, interrupts (human-in-the-loop) with session
+persistence, hooks, structured output, MCP tools via AgentCore Gateway, per-invocation limits.
 
 ## Web UI (sign up a farm, get live updates)
 
