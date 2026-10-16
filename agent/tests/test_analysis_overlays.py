@@ -105,9 +105,10 @@ def test_change_is_nan_where_either_pass_is_invalid():
 
 
 def _detection_only(o):
-    """Drop descriptive fields added after the goldens were recorded (a region's `where` is words, not detection)."""
+    """Drop descriptive fields added after the goldens were recorded (a region's `where` and the result's `crop_state`
+    are words about the season, not detection)."""
     if isinstance(o, dict):
-        return {k: _detection_only(v) for k, v in o.items() if k != "where"}
+        return {k: _detection_only(v) for k, v in o.items() if k not in ("where", "crop_state")}
     if isinstance(o, list):
         return [_detection_only(v) for v in o]
     return o

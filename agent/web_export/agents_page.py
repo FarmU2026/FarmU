@@ -107,7 +107,7 @@ SOURCES = [
      "check": "earth-search.aws.element84.com"},
     {"id": "open_meteo", "short": "Open-Meteo", "name": "Open-Meteo weather archive",
      "gives": "Daily rain and max temperature for the last 30 days at the field",
-     "updates": "Archive lags about 2 days", "code": "agent/fieldwatch/tools.py",
+     "updates": "Archive lags about 2 days", "code": "agent/fieldwatch/openmeteo.py",
      "check": "archive-api.open-meteo.com"},
     {"id": "mrms", "short": "NOAA MRMS radar hail", "name": "NOAA MRMS radar hail",
      "gives": "Largest hail size (MESH, mm) over the field, per day, on a 0.01-degree grid",

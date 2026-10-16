@@ -4,6 +4,10 @@ Scene choice: the latest scene on or before `as_of` (30-day look-back) whose cle
 10 m-buffered field is at least `min_clear_fraction`. Baseline: for each of the 3 prior seasons the clearest
 scene within 10 days of the same calendar date. Previous pass: the latest clear scene before the chosen one
 (within 40 days).
+
+Season passes: up to SEASON_MAX_READS other clear scenes from April 1 to the chosen date, one per 12-day bin (the NDVI
+season curve, green-up and the harvest reference; see phenology.py). Planting date: the farmer's, else the state's
+typical date, refined from green-up; degree days come from Open-Meteo (production path only, like the context layers).
 """
 from __future__ import annotations
 
@@ -15,7 +19,8 @@ from datetime import date, timedelta
 import numpy as np
 
 from .. import contracts as C
-from . import render
+from .. import openmeteo
+from . import phenology, planting_defaults, render
 from .core import analyze_stacks
 from .grid import Grid, IndexStack, Layers, Pivot, SceneData
 from .indices import compute_indices
@@ -31,6 +36,11 @@ PREVIOUS_DAYS = 40
 SEASONS = 3
 SEASON_WINDOW_DAYS = 10
 MAX_READS_PER_SLOT = 6
+SEASON_START = (4, 1)
+SEASON_BIN_DAYS = 12
+SEASON_MAX_READS = 8
+SEASON_MIN_CLEAR = 0.5
+SEASON_MAX_CLOUD = 70.0
 CANDIDATE_MAX_CLOUD = 90.0  # tile-wide cloud cover; the real test is the per-pixel clear fraction
 
 
@@ -112,6 +122,71 @@ def _season_stack(ctx: _Ctx, chosen: date, years_back: int, min_clear: float) ->
     return hit[1] if hit else None
 
 
+def _season_stacks(ctx: _Ctx, chosen: date, skip: set[date]) -> list[IndexStack]:
+    """Clear passes earlier this season, at most one per SEASON_BIN_DAYS bin and SEASON_MAX_READS in all, oldest first."""
+    start = date(chosen.year, *SEASON_START)
+    if (chosen - start).days < SEASON_BIN_DAYS or ctx.req.crop == "alfalfa":
+        return []
+    found = ctx.loader.search(ctx.bbox, start, chosen - timedelta(days=1), max_cloud=SEASON_MAX_CLOUD, limit=60)
+    bins: dict[int, C.SceneInfo] = {}
+    for s in sorted(found, key=lambda s: s.cloud_cover):
+        d = _scene_date(s)
+        if d not in skip and d < chosen:
+            bins.setdefault((d - start).days // SEASON_BIN_DAYS, s)
+    picks = [bins[k] for k in sorted(bins)]
+    if len(picks) > SEASON_MAX_READS:
+        picks = [picks[i] for i in np.linspace(0, len(picks) - 1, SEASON_MAX_READS).round().astype(int)]
+    if not picks:
+        return []
+    with ThreadPoolExecutor(min(4, len(picks))) as pool:
+        stacks = list(pool.map(lambda s: ctx.read(s)[1], picks))
+    return sorted((st for st in stacks if st.clear_fraction >= SEASON_MIN_CLEAR), key=lambda st: st.date)
+
+
+def _centroid_lonlat(polygon) -> tuple[float, float]:
+    return sum(p[0] for p in polygon) / len(polygon), sum(p[1] for p in polygon) / len(polygon)
+
+
+def resolve_planting(req: C.FieldAnalysisRequest, chosen: date, curve: list[tuple[date, float]],
+                     daily_temps) -> phenology.Planting:
+    """Planting date + source + degree days since it. The farmer's date wins; else the state's typical date, refined
+    from the green-up in `curve` when two passes bracket it. `daily_temps(lat, lon, start, end)` may be None or fail:
+    then the date is kept but no degree days are known."""
+    if req.crop not in phenology.MATURITY_GDD:
+        return phenology.Planting()
+    lon, lat = _centroid_lonlat(req.polygon)
+    notes: list[str] = []
+    when, source = None, "unknown"
+    if req.planting_date:
+        try:
+            given = date.fromisoformat(req.planting_date)
+        except ValueError:
+            given = None
+        if given is not None and given.year == chosen.year:
+            when, source = given, "farmer"
+        elif given is not None:
+            notes.append(f"the planting date on file is from {given.year}; using this season's typical date instead")
+    if when is None:
+        when = planting_defaults.default_planting_date(req.crop, lon, lat, chosen.year)
+        source = "state_default" if when else "unknown"
+    temps = None
+    if daily_temps is not None:
+        try:
+            temps = daily_temps(lat, lon, min(when or chosen, date(chosen.year, *SEASON_START)), chosen)
+        except Exception:  # noqa: BLE001 - weather is an input; its failure must not fail the analysis
+            log.warning("no temperatures for %s: degree days unavailable", req.field.field_id, exc_info=True)
+    if temps is not None and source != "farmer":
+        refined = phenology.planting_from_green_up(curve, temps, req.crop)
+        if refined is not None:
+            when, source = refined, "green_up"
+    if when is None:
+        return phenology.Planting(notes=notes)
+    if temps is None:
+        return phenology.Planting(date=when, source=source, notes=notes)
+    gdd = 0.0 if when > chosen else phenology.gdd_between(temps, when, chosen, req.crop)
+    return phenology.Planting(date=when, source=source, gdd=gdd, notes=notes)
+
+
 def _error(req, code, message, retryable=False, scene_id="none") -> C.FieldAnalysisResult:
     return C.FieldAnalysisResult(field=req.field, scene_id=scene_id, date=req.as_of, status="error",
                                  clear_fraction=0.0, error=C.ErrorDetail(code=code, message=message, retryable=retryable))
@@ -119,16 +194,21 @@ def _error(req, code, message, retryable=False, scene_id="none") -> C.FieldAnaly
 
 def analyze(request: C.FieldAnalysisRequest, *, loader: SceneLoader | None = None,
             writer: OverlayWriter | None = None, layers: Layers | None = None,
-            layer_provider="auto") -> C.FieldAnalysisResult:
+            layer_provider="auto", weather="auto") -> C.FieldAnalysisResult:
     """Analyze one field as of a date. Never raises: failures come back as status="error".
 
     Context layers: explicit `layers` win; else `layer_provider(req, grid, inside) -> Layers` (None = none).
     "auto" builds them from the other lanes via interfaces.py, but only on the production path (no injected
-    loader), so fake-loader tests and replays never touch the network. Layer failures never fail the analysis."""
+    loader), so fake-loader tests and replays never touch the network. Layer failures never fail the analysis.
+
+    Weather: `weather(lat, lon, start, end) -> [(day, tmin_F, tmax_F)]` feeds the degree days; "auto" is Open-Meteo on
+    the production path only (no injected loader); None = no degree days."""
     if isinstance(layer_provider, str):
         layer_provider = LayerProvider() if loader is None else None
+    if isinstance(weather, str):
+        weather = openmeteo.daily_temps_f if loader is None else None
     try:
-        return _analyze(request, loader or StacLoader(), writer or NullWriter(), layers, layer_provider)
+        return _analyze(request, loader or StacLoader(), writer or NullWriter(), layers, layer_provider, weather)
     except NoScene as e:
         return _error(request, "NO_SCENE", str(e), retryable=False)
     except (OSError, TimeoutError) as e:  # network, COG reads (rasterio's IO errors subclass OSError)
@@ -138,7 +218,7 @@ def analyze(request: C.FieldAnalysisRequest, *, loader: SceneLoader | None = Non
 
 
 def _analyze(req: C.FieldAnalysisRequest, loader: SceneLoader, writer: OverlayWriter, layers: Layers | None,
-             layer_provider=None):
+             layer_provider=None, weather=None):
     grid, inside = grid_for_polygon(req.polygon)
     if layers is None and layer_provider is not None:
         layers = build_layers(layer_provider, req, grid, inside)
@@ -167,14 +247,19 @@ def _analyze(req: C.FieldAnalysisRequest, loader: SceneLoader, writer: OverlayWr
         h, _ = ctx.first_clear(prev_scenes, req.min_clear_fraction)
         return h[1] if h else None
 
-    with ThreadPoolExecutor(SEASONS + 1) as pool:
+    with ThreadPoolExecutor(SEASONS + 2) as pool:
         pf = pool.submit(prev_job)
+        ssf = pool.submit(_season_stacks, ctx, chosen, {chosen})
         sf = [pool.submit(_season_stack, ctx, chosen, y, req.min_clear_fraction) for y in range(1, SEASONS + 1)]
         previous = pf.result()
         history = [s for s in (f.result() for f in sf) if s is not None]
+        season = ssf.result()
 
+    curve = [(st.date, v) for st in season if (v := phenology.field_median(st.ndvi, st.valid)) is not None]
+    planting = resolve_planting(req, chosen, curve, weather)
     core = analyze_stacks(cur, history, previous, crop=req.crop, pivot=resolve_pivot(req.pivot, req.polygon),
-                          layers=layers, z_threshold=req.z_threshold, min_region_acres=req.min_region_acres)
+                          layers=layers, z_threshold=req.z_threshold, min_region_acres=req.min_region_acres,
+                          season=season, planting=planting)
 
     prefix = f"analysis/{req.field.field_id}/{chosen.isoformat()}/s2/"
     bounds = tuple(round(v, 6) for v in grid.bounds_lonlat())
@@ -205,7 +290,7 @@ def _analyze(req: C.FieldAnalysisRequest, loader: SceneLoader, writer: OverlayWr
         field=req.field, scene_id=scene.scene_id, date=chosen.isoformat(), status=core.status,
         clear_fraction=round(cur.clear_fraction, 3), indices=core.indices, anomaly=core.anomaly,
         gates=core.gates, overlays=C.Overlays(**refs), analysis_key=prefix,
-        comparison=_comparison(chosen, previous, history, core, refs),
+        comparison=_comparison(chosen, previous, history, core, refs), crop_state=core.crop_state,
     )
 
 

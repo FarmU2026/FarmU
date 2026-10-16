@@ -1,5 +1,6 @@
 """Field add / edit / delete on the deployed API (cloud.api.farms), against moto."""
 import json
+from datetime import date, timedelta
 
 import pytest
 
@@ -139,3 +140,46 @@ def test_delete_field_keeps_history(aws):
     _, farm, _ = call(farms, "POST", URL, {"name": "A", "polygon": SQUARE})
     again = next(f for f in farm["fields"] if f["name"] == "A")
     assert again["id"] == f"{a}-2" and "stats" not in again
+
+
+# ---------- optional planting date ----------
+
+
+def _row(aws, field_id):
+    return aws.table("fields").get_item(Key={"farm_id": FARM, "field_id": field_id})["Item"]
+
+
+def test_signup_and_add_store_a_planting_date(aws):
+    today = date.today()
+    ok = (today - timedelta(days=5)).isoformat()
+    code, farm, _ = signup(farms, fields=[{"name": "A", "polygon": NORTH_PIVOT_LATLON, "planting_date": ok},
+                                          {"name": "B", "polygon": SQUARE}])
+    assert code == 200
+    assert _row(aws, f"fld_{FARM}_a")["planting_date"] == ok and "planting_date" not in _row(aws, f"fld_{FARM}_b")
+    assert {f["name"]: f["planting_date"] for f in farm["fields"]} == {"A": ok, "B": None}
+    code, farm, _ = call(farms, "POST", URL, {"name": "C", "polygon": SQUARE, "planting_date": ok})
+    assert code == 200 and _row(aws, f"fld_{FARM}_c")["planting_date"] == ok
+
+
+@pytest.mark.parametrize("bad", ["not a date", "2026-13-40", "1999-05-01", "2999-01-01"])
+def test_invalid_planting_dates_are_rejected(aws, bad):
+    signup(farms)
+    code, out, _ = call(farms, "PATCH", f"{URL}/{FIELD}", {"planting_date": bad})
+    assert code == 400 and "planting_date" in out["error"]["message"]
+    code, out, _ = call(farms, "POST", URL, {"name": "X", "polygon": SQUARE, "planting_date": bad})
+    assert code == 400 and "planting_date" in out["error"]["message"]
+    assert signup(farms, fields=[{"name": "A", "polygon": NORTH_PIVOT_LATLON, "planting_date": bad}])[0] == 400
+
+
+def test_patch_sets_and_clears_the_planting_date_without_restarting_setup(aws, monkeypatch):
+    signup(farms)
+    monkeypatch.setenv("FIELDWATCH_CHECK_FN", "fw-scene-check-latest")
+    ok = date.today().isoformat()
+    code, farm, _ = call(farms, "PATCH", f"{URL}/{FIELD}", {"planting_date": ok})
+    assert code == 200 and farm["fields"][0]["planting_date"] == ok and _row(aws, FIELD)["planting_date"] == ok
+    assert not [c for c in aws.lambda_calls if c[0] == "fw-scene-check-latest"]
+    code, farm, _ = call(farms, "PATCH", f"{URL}/{FIELD}", {"planting_date": ""})
+    assert code == 200 and farm["fields"][0]["planting_date"] is None
+    code, farm, _ = call(farms, "PATCH", f"{URL}/{FIELD}", {"planting_date": ok})
+    code, farm, _ = call(farms, "PATCH", f"{URL}/{FIELD}", {"name": "Renamed"})  # other edits leave it alone
+    assert farm["fields"][0]["planting_date"] == ok

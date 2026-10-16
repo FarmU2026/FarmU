@@ -151,7 +151,7 @@
     $("start").classList.toggle("primary", !addPrimary); $("start").classList.toggle("secondary", addPrimary);
     $("start").disabled = !drafts.length || saving;
     $("stepText").textContent = draft.target ? "Click the new corners. Drag a corner to move it." : n < 3 ? "Click the corners of your field on the map." : "Name it, pick the crop, then press Finish.";
-    $("fname").disabled = !!draft.target; $("fcrop").disabled = !!draft.target;
+    $("fname").disabled = !!draft.target; $("fcrop").disabled = !!draft.target; $("fplant").disabled = !!draft.target;
   }
   $("undoPt").onclick = () => { draft.pts.pop(); redrawDraft(); };
   $("clearPts").onclick = clearDraft;
@@ -170,21 +170,21 @@
     if (draft.pts.length < 3) return;
     $("drawMsg").textContent = "";
     if (draft.target) return saveOutline();
-    const name = $("fname").value.trim() || `field ${(farmId ? fieldsOf().length : drafts.length) + 1}`, crop = $("fcrop").value;
+    const name = $("fname").value.trim() || `field ${(farmId ? fieldsOf().length : drafts.length) + 1}`, crop = $("fcrop").value, planting_date = $("fplant").value || null;
     const polygon = draft.pts.map((p) => [p[0], p[1]]);
     if (!farmId) {
-      drafts.push({ name, crop, polygon }); clearDraft(); $("fname").value = ""; renderDrafts();
+      drafts.push({ name, crop, polygon, planting_date }); clearDraft(); $("fname").value = ""; $("fplant").value = ""; renderDrafts();
       return;
     }
     saving = true; drawUi(); $("addField").textContent = "Adding...";
     try {
       let res;
-      if (demo) { res = null; farm.fields.push({ id: slug(name) + "-" + (farm.fields.length + 1), name, crop, acres: Math.round(acresOf(polygon)), polygon: polygon.map(([a, b]) => [b, a]), stats: null }); }
-      else res = await FW.fieldsApi.add(farmId, { name, crop, polygon });
+      if (demo) { res = null; farm.fields.push({ id: slug(name) + "-" + (farm.fields.length + 1), name, crop, planting_date, acres: Math.round(acresOf(polygon)), polygon: polygon.map(([a, b]) => [b, a]), stats: null }); }
+      else res = await FW.fieldsApi.add(farmId, { name, crop, polygon, planting_date });
       const before = new Set(fieldsOf().map((x) => x.id));
       if (res) applyEdited(res);
       const added = fieldsOf().find((x) => !before.has(x.id)) || fieldsOf().find((x) => x.name === name);
-      clearDraft(); $("fname").value = "";
+      clearDraft(); $("fname").value = ""; $("fplant").value = "";
       $("drawMsg").className = "meta"; $("drawMsg").innerHTML = `Added ${esc(name)}. <a href="#plots" data-go="plots">See it in Plots</a>`;
       if (added) selected = added.id;
       fitNext = true; userMoved = false; schedule();
@@ -234,7 +234,7 @@
     }
     saving = true; $("start").disabled = true; $("start").textContent = "Pulling the latest satellite pass...";
     try {
-      const body = { phone: $("phone").value, farmer: $("farmer").value.trim() || "Farmer", fields: drafts.map((f) => ({ name: f.name, crop: f.crop, polygon: f.polygon })) };
+      const body = { phone: $("phone").value, farmer: $("farmer").value.trim() || "Farmer", fields: drafts.map((f) => ({ name: f.name, crop: f.crop, polygon: f.polygon, planting_date: f.planting_date || null })) };
       const f = await api("/api/farms", { method: "POST", body });
       farmId = f.farm_id;
       const q = new URLSearchParams(location.search); q.set("farm", farmId);
@@ -596,7 +596,8 @@
       h += inRecCard(f) ? `<p class="meta see-note">Pictures of this field are in its card at the top of this page, under What to do.</p>` : seeHtml(f, "row");
       h += `<div class="actions"><button class="btn secondary" type="button" data-ask="${esc(f.id)}" ${askBusy ? "disabled" : ""}>${askBusy === f.id ? "Asking..." : "Ask FieldWatch about this field"}</button></div>
         <div class="editgrid"><div><label for="ename">Name</label><input id="ename" value="${esc(f.name)}" autocomplete="off"></div>
-        <div><label for="ecrop">Crop</label><select id="ecrop">${CROPS.concat(CROPS.includes(f.crop) ? [] : [f.crop]).map((c) => `<option${c === f.crop ? " selected" : ""}>${esc(c)}</option>`).join("")}</select></div></div>
+        <div><label for="ecrop">Crop</label><select id="ecrop">${CROPS.concat(CROPS.includes(f.crop) ? [] : [f.crop]).map((c) => `<option${c === f.crop ? " selected" : ""}>${esc(c)}</option>`).join("")}</select></div>
+        <div><label for="eplant">Planting date <span class="quiet">(optional)</span></label><input id="eplant" type="date" value="${esc(f.planting_date || "")}"></div></div>
         <div class="actions"><button class="btn secondary" type="button" data-save="${esc(f.id)}" ${saving ? "disabled" : ""}>${saving ? "Saving..." : "Save changes"}</button>
           <button class="btn secondary" type="button" data-redraw="${esc(f.id)}">Redraw outline</button></div>`;
       if (confirmDel === f.id) h += `<p class="step">Stop watching ${esc(f.name)}? This cannot be undone.</p>
@@ -745,12 +746,12 @@
       askBusy = null; schedule(); return;
     }
     if ((b = t.closest("[data-save]"))) {
-      const fl = f(b.dataset.save), name = $("ename").value.trim(), crop = $("ecrop").value;
+      const fl = f(b.dataset.save), name = $("ename").value.trim(), crop = $("ecrop").value, planting_date = $("eplant").value || null;
       if (!name) { plotMsg = { id: fl.id, text: "Give the field a name first.", tone: "bad" }; return schedule(); }
-      if (name === fl.name && crop === fl.crop) { plotMsg = { id: fl.id, text: "Nothing changed.", tone: "" }; return schedule(); }
+      if (name === fl.name && crop === fl.crop && planting_date === (fl.planting_date || null)) { plotMsg = { id: fl.id, text: "Nothing changed.", tone: "" }; return schedule(); }
       return editAction(fl, "Saving...", async () => {
-        if (demo) { fl.name = name; fl.crop = crop; return null; }
-        return FW.fieldsApi.update(farmId, fl.id, { name, crop });
+        if (demo) { fl.name = name; fl.crop = crop; fl.planting_date = planting_date; return null; }
+        return FW.fieldsApi.update(farmId, fl.id, { name, crop, planting_date });
       }, "Saved.");
     }
     if ((b = t.closest("[data-redraw]"))) return startRedraw(f(b.dataset.redraw));

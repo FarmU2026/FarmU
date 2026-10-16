@@ -1,6 +1,6 @@
 /* Field editing client. One small module so the endpoints live in one place.
      POST   /api/farms/{farm_id}/fields                 {name, crop, polygon:[[lat,lon],...]}     -> farm payload
-     PATCH  /api/farms/{farm_id}/fields/{field_id}      {name?, crop?, polygon?:[[lat,lon],...]}  -> farm payload
+     PATCH  /api/farms/{farm_id}/fields/{field_id}      {name?, crop?, polygon?:[[lat,lon],...], planting_date?: "YYYY-MM-DD" | null}  -> farm payload
      DELETE /api/farms/{farm_id}/fields/{field_id}                                                -> farm payload
    Polygons are sent as [lat, lon] pairs, the same as POST /api/farms. Every call resolves to a FULL farm payload (the
    same shape as GET /api/farms/{id}): if the server answers with just the field, or with nothing (204), we GET the
@@ -30,7 +30,7 @@
 
   FW.fieldsApi = {
     MSG,
-    add: (farmId, f) => call(farmId, base(farmId), { method: "POST", body: { name: f.name, crop: f.crop, polygon: f.polygon } }),
+    add: (farmId, f) => call(farmId, base(farmId), { method: "POST", body: { name: f.name, crop: f.crop, polygon: f.polygon, planting_date: f.planting_date || null } }),
     update: (farmId, fid, patch) => call(farmId, `${base(farmId)}/${encodeURIComponent(fid)}`, { method: "PATCH", body: patch }),
     remove: (farmId, fid) => call(farmId, `${base(farmId)}/${encodeURIComponent(fid)}`, { method: "DELETE" }),
   };

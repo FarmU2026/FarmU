@@ -292,6 +292,12 @@ class TestLoadInputs:
         assert req.pivot == {"center": [-96.54, 42.16], "radius_m": 800.0}
         assert (req.min_clear_fraction, req.min_region_acres, req.z_threshold) == (0.7, 1.2, 2.0)
 
+    def test_planting_date_is_passed_through(self, aws):
+        register_field(planting_date="2026-05-04")
+        assert load_inputs.handler(self.item())["planting_date"] == "2026-05-04"
+        register_field(planting_date=None)
+        assert load_inputs.handler(self.item())["planting_date"] is None
+
     def test_unknown_crop_and_inline_polygon(self, aws):
         register_field(geometry=False, crop_current="sugar beets", polygon=RING)
         req = C.FieldAnalysisRequest.model_validate(load_inputs.handler(self.item()))

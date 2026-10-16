@@ -116,5 +116,15 @@
     }
   },
   "analysis_key": "analysis/north-pivot/2026-07-18/s2/",
-  "error": null
+  "error": null,
+  "crop_state": {
+    "state": "reproductive",
+    "stage_label": "R1 (est.)",
+    "gdd_since_planting": 1450,
+    "planting_date": "2026-05-06",
+    "planting_date_source": "farmer",
+    "diagnosable": true,
+    "hail_only": false,
+    "reasons": []
+  }
 }

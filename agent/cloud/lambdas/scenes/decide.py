@@ -1,7 +1,8 @@
 """Decide (state machine step 3, also the per-field error recorder).
 
-Rule (docs/implementation-specs.md "Decision"): emit AnomalyDetected when status == "ok", at least one region has
-score >= z_threshold and area_acres >= min_region_acres, and no gate is set. Always writes the fw-scene-analyses row
+Rule (docs/implementation-specs.md "Decision"): emit AnomalyDetected when status == "ok", the crop state allows it
+(`crop_state.diagnosable`, or `hail_only` with the hail exception in its reasons; no crop_state = as before), at least
+one region has score >= z_threshold and area_acres >= min_region_acres, and no gate is set. Always writes the fw-scene-analyses row
 (`date#source` sort key) and emits SceneAnalyzed.
 
 Idempotency (docs "Replay correctness" 6): every emit is preceded by a conditional put in fw-idempotency, so running the
@@ -20,6 +21,11 @@ from fieldwatch import contracts as C
 
 from . import common as cm
 from .common import log
+
+
+# phenology.HAIL_EXCEPTION: the token the analyzer puts in CropState.reasons when a sudden drop on a pre-senescence
+# scene follows a clean previous pass. Duplicated so this module needs nothing from the geo-only analysis package.
+HAIL_EXCEPTION = "hail_exception=True"
 
 
 @dataclass
@@ -41,6 +47,10 @@ def evaluate(result: C.FieldAnalysisResult, z_threshold: float, min_region_acres
     field_id/date override the result's own (the request and scene are authoritative for keys)."""
     if result.status != "ok":
         return Decision(False, f"status is {result.status}")
+    state = result.crop_state
+    if state is not None and not state.diagnosable and not (state.hail_only and HAIL_EXCEPTION in state.reasons):
+        why = "only a sudden hail-like drop may alert now" if state.hail_only else "stress diagnosis is off in this state"
+        return Decision(False, f"crop state {state.state}: {why}")
     gates = result.gates
     if gates is not None:
         tripped = [name for name in ("senescence", "harvest", "regional") if getattr(gates, name)]
@@ -110,7 +120,8 @@ def decide_field(event: dict) -> dict:
         "overlays": result.overlays.model_dump(mode="json") if result.overlays else None,
         # Dates and color scales behind the departure / change / normal overlays (captions); None on older rows.
         "comparison": result.comparison.model_dump(mode="json") if result.comparison else None,
-        "analysis_key": result.analysis_key, "emit": decision.emit, "reason": decision.reason,
+        "analysis_key": result.analysis_key,
+        "crop_state": result.crop_state.model_dump(mode="json") if result.crop_state else None, "emit": decision.emit, "reason": decision.reason,
         "anomaly_id": decision.anomaly_id, "open_watch_ids": request.open_watch_ids,
         # The analyzer reports its own failures as data (status "error" + error detail); keep the detail.
         "error": result.error.model_dump(mode="json") if result.error else None,
