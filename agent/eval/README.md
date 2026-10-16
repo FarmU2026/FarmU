@@ -131,3 +131,57 @@ python -m eval.find_scenes --bbox=-96.548,42.152,-96.532,42.168 --event-date 202
   `farm_fixture` and `expected.top_condition` / `action_type` by hand, then move it into `scenarios/`.
 - Negative longitudes: the CLI handles `--bbox -96.5,...` and `--point -...` itself; `--bbox=` also works.
 - Code: `fieldwatch/analysis/scenes.py` (`find_clear_scenes`, `bracket_event`, `draft_scenario`).
+
+## Conversation eval (`eval/conversations/`)
+
+Scripted farmer chats against the deployed API, checked for correct, grounded, safe and stable answers. The scenario
+runner above tests the pipeline (alert, condition, action); this tests what the farmer is told when they text back.
+
+```
+cd agent
+export FIELDWATCH_API_URL=https://<api-id>.execute-api.us-west-2.amazonaws.com
+export FIELDWATCH_DASHBOARD_PASSCODE=<passcode>      # optional: full investigation records (explanation_json)
+python -m eval.conversations.run --farm-id <farm id> --repeat 3 --judge
+python -m eval.conversations.report eval/conversations/results/<timestamp>.json   # markdown for a PR
+python -m eval.conversations.run --farm-id x --list                                 # list the cases
+```
+
+Flags: `--case NAME` (repeatable), `--repeat N` (N>=2 measures stability), `--judge` (Bedrock, model from env
+`FIELDWATCH_JUDGE_MODEL`, default `us.anthropic.claude-haiku-4-5-20251001-v1:0`), `--timeout` (seconds per turn, 120),
+`--setup-timeout` (300), `--field-map "home field=<deployed field name>"` (repeatable). Exit code 0 when every case run
+passed, 1 on a failed check or a case that could not run, 2 on usage errors. Transcripts go to
+`eval/conversations/results/<timestamp>.json` (gitignored).
+
+**How a turn runs.** `POST /api/farms/{id}/reply {"text"}`, then poll `GET /api/farms/{id}` until a new
+`who: fieldwatch`, `kind: message` thread item with `investigation_id` starting `inv-q-` appears (or the timeout). The
+farm picks the field from the field name in the text, so cases write `{field}` (replaced with the field's name).
+`setup.ask_first` asks about the field (`POST .../fields/{field_id}/ask`) and waits for the alert, unless the field
+already has a diagnosis (`setup.fresh` forces a new one). The **record** is the field's newest entry in the farm
+payload `diagnoses`, enriched with `GET /v1/investigations/{id}` (`diagnosis_json`, `explanation_json`) when the
+dashboard passcode is set.
+
+**Case files** (`cases/*.json`; `cases/_defaults.json` applies to every turn: no internal ids, raw index numbers,
+jargon or unsanctioned percentages, <= 320 chars, ASCII, answered within 90 s):
+
+| check | meaning |
+| --- | --- |
+| `must_mention_any: [regex]` | at least one matches |
+| `must_not_mention: [regex or @token]` | none match. Tokens: `@internal_ids` (`inv_`, `per_`, `fld_`, `inv-q-`...), `@index_numbers` (`0.28`), `@jargon` (NDVI, Sentinel-2...), `@percentages` (unless the record/alert has that percent), `@product_advice` (rates, product and active-ingredient names) |
+| `max_chars`, `ascii_only`, `answers_within_s` | length, plain ASCII, seconds from send to answer |
+| `consistent_with_record` | cause words in the answer must be the recorded condition (or a live hypothesis), certainty tier (`pretty sure` / `fairly sure` / `not sure yet`) must equal `how_sure`, compass words must fit the record's `where`. Options `{require_cause, require_tier, require_where}`. Not evaluated when the field has no record |
+| `no_new_numbers` | every number appears in the record, the field facts, the alert text or the question. Option `{allow: [..]}` |
+| `no_cause_claimed` | no cause asserted (sentences with "no/not/ruled out" are ignored); for harvested fields |
+| `no_action_items` | no action, concluded or new-investigation item appeared in the thread during the turn |
+| `consistent_with_turn: {turn, dims}` | same cause / tier / place as an earlier answer |
+| `expect_answer: false` | passes only if the farm stays quiet |
+| `rubric` (on the turn) | free text for the judge; the judge is advisory and never changes pass/fail |
+
+Case-level `record: required | none | any` is a precondition on the field (`none` for harvested fields).
+Field names inside answers are ignored when reading causes and places ("north pivot" is not a pivot failure).
+
+**Stability.** With `--repeat N` each case runs N times. Per turn, agreement is the share of runs whose
+(cause, tier, place) equals the most common one; the case figure is the mean over its turns. The `stable-*` cases also
+ask the same question twice inside one conversation (`consistent_with_turn`).
+
+**Adding a case.** Copy a file in `cases/`, set `field` (the deployed field's name), `record`, `setup`, and turns. Run
+it with `--case <name>`.

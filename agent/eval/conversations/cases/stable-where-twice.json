@@ -1,0 +1,33 @@
+{
+  "name": "stable-where-twice",
+  "description": "Stability: 'where is it' twice gives the same place.",
+  "field": "north pivot",
+  "record": "required",
+  "setup": {
+    "ask_first": true
+  },
+  "turns": [
+    {
+      "say": "where in {field} is the problem?",
+      "checks": {
+        "consistent_with_record": {
+          "require_where": true
+        }
+      }
+    },
+    {
+      "say": "where in {field} is the problem?",
+      "checks": {
+        "consistent_with_record": {
+          "require_where": true
+        },
+        "consistent_with_turn": {
+          "turn": 0,
+          "dims": [
+            "where"
+          ]
+        }
+      }
+    }
+  ]
+}

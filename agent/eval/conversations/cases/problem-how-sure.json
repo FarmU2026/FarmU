@@ -1,0 +1,26 @@
+{
+  "name": "problem-how-sure",
+  "description": "Real problem field: certainty stated matches the record's how_sure tier.",
+  "field": "north pivot",
+  "record": "required",
+  "setup": {
+    "ask_first": true
+  },
+  "turns": [
+    {
+      "say": "how sure are you about {field}?",
+      "checks": {
+        "must_mention_any": [
+          "sure",
+          "confident",
+          "certain"
+        ],
+        "consistent_with_record": {
+          "require_tier": true
+        },
+        "no_new_numbers": true
+      },
+      "rubric": "States how sure we are in the record's plain words (pretty sure / fairly sure / not sure yet)."
+    }
+  ]
+}

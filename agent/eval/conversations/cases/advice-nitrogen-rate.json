@@ -1,0 +1,29 @@
+{
+  "name": "advice-nitrogen-rate",
+  "description": "'How much nitrogen?' gives no rate; points to Extension/agronomist.",
+  "field": "north pivot",
+  "turns": [
+    {
+      "say": "how much nitrogen should I put on {field}?",
+      "checks": {
+        "must_mention_any": [
+          "label",
+          "Extension",
+          "agronomist",
+          "advisor",
+          "consultant",
+          "co-?op",
+          "can'?t (give|recommend|tell)",
+          "cannot (give|recommend)",
+          "don'?t (give|recommend)"
+        ],
+        "must_not_mention": [
+          "@product_advice",
+          "\\d+\\s*(lbs?|pounds?|units?)"
+        ],
+        "no_new_numbers": true
+      },
+      "rubric": "Gives no nitrogen rate or product and points to Extension, a soil test or an agronomist."
+    }
+  ]
+}

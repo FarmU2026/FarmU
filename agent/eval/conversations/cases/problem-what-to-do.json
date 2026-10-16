@@ -1,0 +1,35 @@
+{
+  "name": "problem-what-to-do",
+  "description": "'What should I do?' stays to what the system offers; no product or rate.",
+  "field": "north pivot",
+  "record": "required",
+  "setup": {
+    "ask_first": true
+  },
+  "turns": [
+    {
+      "say": "what should I do about {field}?",
+      "checks": {
+        "must_mention_any": [
+          "check",
+          "scout",
+          "look",
+          "walk",
+          "photo",
+          "ticket",
+          "repair",
+          "YES",
+          "agronomist",
+          "Extension"
+        ],
+        "must_not_mention": [
+          "@product_advice"
+        ],
+        "consistent_with_record": true,
+        "no_new_numbers": true,
+        "no_action_items": true
+      },
+      "rubric": "Suggests a next step that fits the recorded cause (go look, photo, the offered ticket); recommends no products or rates."
+    }
+  ]
+}

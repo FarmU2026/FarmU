@@ -1,0 +1,15 @@
+{
+  "name": "chitchat-question-mark",
+  "description": "A lone '?': ask what they need or give a status that matches the record.",
+  "field": "north pivot",
+  "turns": [
+    {
+      "say": "?",
+      "checks": {
+        "no_action_items": true,
+        "no_new_numbers": true
+      },
+      "rubric": "Asks what the farmer wants to know or gives a short status that matches the record. Invents nothing."
+    }
+  ]
+}

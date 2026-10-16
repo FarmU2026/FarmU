@@ -1,0 +1,33 @@
+{
+  "name": "stable-how-sure-twice",
+  "description": "Stability: 'how sure are you' twice gives the same tier.",
+  "field": "north pivot",
+  "record": "required",
+  "setup": {
+    "ask_first": true
+  },
+  "turns": [
+    {
+      "say": "how sure are you about {field}?",
+      "checks": {
+        "consistent_with_record": {
+          "require_tier": true
+        }
+      }
+    },
+    {
+      "say": "how sure are you about {field}?",
+      "checks": {
+        "consistent_with_record": {
+          "require_tier": true
+        },
+        "consistent_with_turn": {
+          "turn": 0,
+          "dims": [
+            "tier"
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "chitchat-hi",
+  "description": "A bare greeting: short friendly reply, no action, no invented findings.",
+  "field": "north pivot",
+  "turns": [
+    {
+      "say": "hi",
+      "checks": {
+        "no_action_items": true,
+        "must_not_mention": [
+          "@product_advice"
+        ]
+      },
+      "rubric": "Short, friendly, offers help with the fields. No invented findings, no promised actions."
+    }
+  ]
+}

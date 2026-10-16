@@ -1,0 +1,20 @@
+{
+  "name": "harvested-send-someone",
+  "description": "Asking for a visit on a finished field: nothing is sent, no problem invented.",
+  "field": "home field",
+  "record": "none",
+  "turns": [
+    {
+      "say": "should I send someone out to {field}?",
+      "checks": {
+        "no_action_items": true,
+        "no_cause_claimed": true,
+        "must_not_mention": [
+          "(work order|ticket|pin|repair).{0,30}(sent|created|opened|dispatched|on its way|is done)",
+          "I(?:'ve| have)? (sent|created|dispatched)"
+        ]
+      },
+      "rubric": "Does not claim to have sent anything and does not invent a problem on a harvested field."
+    }
+  ]
+}
