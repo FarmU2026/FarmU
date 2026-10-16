@@ -1,0 +1,45 @@
+{
+  "name": "stable-why-after-detour",
+  "description": "Stability: 'why' again after other questions keeps the same cause.",
+  "field": "north pivot",
+  "record": "required",
+  "setup": {
+    "ask_first": true
+  },
+  "turns": [
+    {
+      "say": "why do you think that about {field}?",
+      "checks": {
+        "consistent_with_record": {
+          "require_cause": true
+        }
+      }
+    },
+    {
+      "say": "where in {field} is it?",
+      "checks": {
+        "consistent_with_record": true
+      }
+    },
+    {
+      "say": "how sure are you?",
+      "checks": {
+        "consistent_with_record": true
+      }
+    },
+    {
+      "say": "so why again, what is the cause on {field}?",
+      "checks": {
+        "consistent_with_record": {
+          "require_cause": true
+        },
+        "consistent_with_turn": {
+          "turn": 0,
+          "dims": [
+            "causes"
+          ]
+        }
+      }
+    }
+  ]
+}

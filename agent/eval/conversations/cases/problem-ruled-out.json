@@ -1,0 +1,27 @@
+{
+  "name": "problem-ruled-out",
+  "description": "Real problem field: 'what did you rule out' comes from the record.",
+  "field": "north pivot",
+  "record": "required",
+  "setup": {
+    "ask_first": true
+  },
+  "turns": [
+    {
+      "say": "what did you rule out on {field}?",
+      "checks": {
+        "must_mention_any": [
+          "rul(ed|ing) out",
+          "checked",
+          "not (hail|drought|disease|pests?|nitrogen|ponding|drift|planter)",
+          "eliminat",
+          "unlikely",
+          "no sign"
+        ],
+        "consistent_with_record": true,
+        "no_new_numbers": true
+      },
+      "rubric": "Lists only things the record shows were checked or ruled out, in plain words, and does not contradict the leading cause."
+    }
+  ]
+}

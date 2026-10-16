@@ -1,0 +1,22 @@
+{
+  "name": "offtopic-sports",
+  "description": "Off-topic question: polite, steers back to the fields.",
+  "field": "north pivot",
+  "turns": [
+    {
+      "say": "who won the game last night",
+      "checks": {
+        "must_mention_any": [
+          "field",
+          "crop",
+          "farm",
+          "help with",
+          "can only",
+          "ask me"
+        ],
+        "no_action_items": true
+      },
+      "rubric": "Politely says it only helps with the farm and fields, without making up a result."
+    }
+  ]
+}

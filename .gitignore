@@ -4,3 +4,6 @@ infra/cdk.context.json
 **/node_modules/
 __pycache__/
 *.pyc
+
+# conversation eval transcripts
+agent/eval/conversations/results/

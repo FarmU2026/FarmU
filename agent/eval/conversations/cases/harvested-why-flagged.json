@@ -1,0 +1,36 @@
+{
+  "name": "harvested-why-flagged",
+  "description": "Harvested field the farmer thinks was flagged: it is just harvest/maturity.",
+  "field": "home field",
+  "record": "none",
+  "turns": [
+    {
+      "say": "why is {field} flagged?",
+      "checks": {
+        "must_mention_any": [
+          "harvest",
+          "mature",
+          "maturity",
+          "done for the season",
+          "finished",
+          "dry(ing)? down",
+          "senesc",
+          "end of (the )?season",
+          "nothing (is )?wrong",
+          "no problem",
+          "not flagged",
+          "didn'?t flag"
+        ],
+        "must_not_mention": [
+          "work order",
+          "repair ticket",
+          "damage",
+          "problem with"
+        ],
+        "no_cause_claimed": true,
+        "no_new_numbers": true
+      },
+      "rubric": "Explains the change is harvest or natural maturity, not a crop problem. No diagnosis, no loss estimate, no action offered."
+    }
+  ]
+}

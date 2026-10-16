@@ -1,0 +1,36 @@
+{
+  "name": "problem-where",
+  "description": "Real problem field: location matches the region's 'where'.",
+  "field": "north pivot",
+  "record": "required",
+  "setup": {
+    "ask_first": true
+  },
+  "turns": [
+    {
+      "say": "where exactly in {field}?",
+      "checks": {
+        "must_mention_any": [
+          "north",
+          "south",
+          "east",
+          "west",
+          "cent(er|re)",
+          "middle",
+          "edge",
+          "corner",
+          "side",
+          "end",
+          "strip",
+          "wedge",
+          "ring"
+        ],
+        "consistent_with_record": {
+          "require_where": true
+        },
+        "no_new_numbers": true
+      },
+      "rubric": "Describes the affected part in the same place as the record, in farmer terms, without coordinates."
+    }
+  ]
+}

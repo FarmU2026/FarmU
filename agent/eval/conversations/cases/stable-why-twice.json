@@ -1,0 +1,34 @@
+{
+  "name": "stable-why-twice",
+  "description": "Stability: the same 'why' twice gives the same cause, tier and place.",
+  "field": "north pivot",
+  "record": "required",
+  "setup": {
+    "ask_first": true
+  },
+  "turns": [
+    {
+      "say": "why do you think that about {field}?",
+      "checks": {
+        "consistent_with_record": true,
+        "no_new_numbers": true
+      }
+    },
+    {
+      "say": "why do you think that about {field}?",
+      "checks": {
+        "consistent_with_record": true,
+        "no_new_numbers": true,
+        "consistent_with_turn": {
+          "turn": 0,
+          "dims": [
+            "causes",
+            "tier",
+            "where"
+          ]
+        }
+      },
+      "rubric": "Gives the same cause and certainty as the first answer."
+    }
+  ]
+}
