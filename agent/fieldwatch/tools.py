@@ -316,7 +316,8 @@ def send_farmer_message(person_id: str, body: str, investigation_id: str = "", u
     name the farmer uses. person_id from the farm's people (the farmer is the default). urgency: low,
     actionable or urgent (urgent skips quiet hours)."""
     try:
-        res = deliver_message(person_id=person_id or _farmer_id(), body=body, investigation_id=investigation_id or None,
+        res = deliver_message(person_id=person_id or _farmer_id(), body=schemas.farmer_text(body),
+                              investigation_id=investigation_id or None,
                               urgency=urgency if urgency in ("low", "actionable", "urgent") else "actionable")
     except interfaces.FieldwatchError as e:
         return {"status": "error", "code": e.code, "message": e.message}

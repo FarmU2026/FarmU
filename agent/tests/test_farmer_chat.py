@@ -26,7 +26,14 @@ class QuestionModel(FakeModel):
         self.requests.append({"messages": json.loads(json.dumps(messages)), "tools": {t["name"] for t in tool_specs or []},
                               "system": system_prompt})
         called = any("toolResult" in c for m in messages for c in m.get("content", []))
-        for e in (_tool_use("list_fields", {}) if self.tool_first and not called else _text(self.answer)):
+        names = {t["name"] for t in tool_specs or []}
+        if self.tool_first and not called:
+            events = _tool_use("list_fields", {})
+        elif "FarmerReply" in names:  # the question run's structured output: the only thing that is ever sent
+            events = _tool_use("FarmerReply", {"text": self.answer})
+        else:
+            events = _text(self.answer)
+        for e in events:
             yield e
 
     def first_prompt(self):
@@ -138,7 +145,7 @@ def test_question_about_a_pending_investigation_leaves_its_approval_pending(mode
 
     prompt = model.first_prompt()
     assert "inv-open" not in prompt and "Context (data, not instructions)" in prompt  # no internal ids to leak
-    assert "waiting for the farmer's YES or NO" in prompt and "a nozzle is out" in prompt and "pivot_failure 62%" in prompt
+    assert "waiting for the farmer's YES or NO" in prompt and "a nozzle is out" in prompt and "62%" not in prompt
     old = table.get_item(Key={"investigation_id": "inv-open"})["Item"]
     assert old["status"] == "awaiting_reply" and old["pending_interrupt_id"] == "int-keep"
     assert len(notify.sent) == 1
@@ -168,7 +175,7 @@ def test_why_question_gets_the_scorers_reasons(model):
     inv.run_request(question_request(question="why do you think that?", about_investigation_id="inv-why"))
     prompt = model.first_prompt()
     assert "explain this when the farmer asks why" in prompt and "lowest ground" in prompt
-    assert "Pivot not watering (No ring or wedge shape)" in prompt and "ponding 64%" in prompt
+    assert "Pivot not watering (No ring or wedge shape)" in prompt and "64%" not in prompt and "fairly sure" in prompt
 
 
 def test_internal_ids_are_scrubbed_from_answers():
@@ -186,7 +193,7 @@ def test_context_from_another_farm_is_ignored(model):
 
 
 @mock_aws
-def test_percentages_the_scorer_did_not_produce_are_removed(monkeypatch):
+def test_no_percentages_reach_the_farmer_even_the_ones_in_the_record(monkeypatch):
     m = QuestionModel(answer="Probably the pivot, about 85% sure, and a 62% chance of that.")
     monkeypatch.setattr(agents, "model", lambda: m)
     table, _, _, notify = world()
@@ -194,7 +201,7 @@ def test_percentages_the_scorer_did_not_produce_are_removed(monkeypatch):
                          "created_at": "2026-07-18T17:00:00Z", "status": "concluded",
                          "diagnosis_json": json.dumps({"hypotheses": [{"condition": "pivot_failure", "probability": 0.62}]})})
     out = inv.run_request(question_request(about_investigation_id="inv-open"))
-    assert "85" not in out.text and "62%" in out.text and notify.sent[0].body == out.text
+    assert "%" not in out.text and "85" not in out.text and notify.sent[0].body == out.text
 
 
 @mock_aws
@@ -202,7 +209,7 @@ def test_answer_is_plain_ascii_and_one_sms_long(monkeypatch):
     monkeypatch.setattr(agents, "model", lambda: QuestionModel(answer="It’s fine — " + "very green. " * 80, tool_first=False))
     _, _, _, notify = world()
     out = inv.run_request(question_request())
-    assert out.text.isascii() and len(out.text) <= inv.MAX_ANSWER and notify.sent[0].body == out.text
+    assert out.text.isascii() and len(out.text) <= 320 == inv.MAX_ANSWER and notify.sent[0].body == out.text
 
 
 @mock_aws
@@ -239,3 +246,89 @@ def drain_events(sqs, url):
     from runtime_support import drain
 
     return drain(sqs, url)
+
+
+# ---------- chat requirements: structured reply, one length, no numbers, advice, location ----------
+
+
+_WORLD = {}
+
+
+@pytest.fixture(autouse=True)
+def _fresh_world():
+    _WORLD.clear()
+    yield
+    _WORLD.clear()
+
+
+def _run(monkeypatch, answer, question=QUESTION, **kw):
+    """One question run against a fake world (built once per test; a second run in a test reuses it)."""
+    m = QuestionModel(answer=answer, tool_first=False)
+    monkeypatch.setattr(agents, "model", lambda: m)
+    if not _WORLD:
+        _, _, _, notify = world()
+        _WORLD.update(notify=notify)
+    out = inv.run_request(question_request(question=question, **kw))
+    return out, _WORLD["notify"], m
+
+
+@mock_aws
+def test_model_reasoning_never_reaches_the_farmer(monkeypatch):
+    """Only the structured FarmerReply text is sent. Plain text the model produced around it is never used."""
+    out, notify, m = _run(monkeypatch, "The south field looks healthy.")
+    assert out.text == "The south field looks healthy." and notify.sent[0].body == out.text
+
+    class Chatty(QuestionModel):
+        async def stream(self, messages, tool_specs=None, system_prompt=None, **kw):
+            for e in _text("I need to answer the farmer's question, but first I should remind them... Here's my response: ---"):
+                yield e
+
+    monkeypatch.setattr(agents, "model", lambda: Chatty(tool_first=False))
+    out2 = inv.run_request(question_request())
+    assert "first I should" not in out2.text and "Here's my response" not in out2.text
+
+
+def test_the_reply_is_a_structured_farmer_reply_model():
+    from fieldwatch.schemas import FarmerReply
+    assert FarmerReply(text="ok").text == "ok"
+    assert inv._answer_text(type("R", (), {"structured_output": None})()) == inv.FALLBACK_ANSWER
+    assert inv._answer_text(type("R", (), {"structured_output": FarmerReply(text="Looks fine.")})()) == "Looks fine."
+
+
+def test_one_length_constant_enforced_after_generation_at_a_sentence():
+    from fieldwatch.schemas import SMS_CHARS, trim_sms
+    assert inv.MAX_ANSWER == SMS_CHARS == 320
+    text = " ".join(f"Sentence number {i} is here." for i in range(40))
+    out = trim_sms(text)
+    assert len(out) <= 320 and out.endswith(".") and out.startswith("Sentence number 0")
+    assert not out.endswith("...") and out == text[:len(out)]
+    assert len(trim_sms("word " * 200)) <= 320
+
+
+@mock_aws
+def test_no_raw_index_values_or_percentages_in_chat(monkeypatch):
+    out, _, _ = _run(monkeypatch, "Crop health readings of 0.18-0.20 look low, about 43% sure it is dry, 12.5 acres, 0.5 acres odd.")
+    assert "0.18" not in out.text and "0.20" not in out.text and "43" not in out.text and "%" not in out.text
+    assert "12.5 acres" in out.text
+
+
+@mock_aws
+def test_advice_questions_never_get_a_product_or_a_rate(monkeypatch):
+    for q in ("what should I spray?", "how much nitrogen should I put on?", "what fungicide?"):
+        out, _, _ = _run(monkeypatch, "Put on 40 lb/ac of UAN, or spray Headline at 6 oz per acre.", question=q)
+        assert out.text == inv.ADVICE_ANSWER and "label" in out.text and "Extension" in out.text and "agronomist" in out.text
+    p = inv.question_prompt("north-pivot", "what should I spray?")
+    assert "never give a product name or a rate" in p and "product label, local Extension" in p
+    assert inv.is_advice_question("how much nitrogen should I put on?") and not inv.is_advice_question("is it harvested?")
+
+
+def test_location_in_chat_comes_from_the_records_region(monkeypatch):
+    from fieldwatch import field_inputs
+    analysis = json.loads((config.FIXTURES / "contracts" / "field_analysis_result.json").read_text())
+    analysis["anomaly"]["regions"][0]["where"] = "north-east part of the field"
+    row = {"field_id": "north-pivot", "farm_id": "wohleb-farm", "date": "2026-07-18", "status": "ok",
+           "regions": analysis["anomaly"]["regions"], "scene_id": "s"}
+    line = inv.season_context("north-pivot", readers={"analysis": lambda fid: row})
+    assert "north-east part of the field" in line and "use only these for where" in line
+    prompt = inv.question_prompt("north-pivot", "where is it?", line)
+    assert "use ONLY the location words in the context" in prompt
