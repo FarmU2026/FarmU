@@ -164,6 +164,17 @@ class FieldAnalysisRequest(Contract):
     z_threshold: float = 2.0
 
 
+class CropState(Contract):
+    state: Literal["pre_emergence", "vegetative", "reproductive", "senescing", "harvest_in_progress", "harvested", "unknown"]
+    stage_label: str | None = None
+    gdd_since_planting: float | None = None
+    planting_date: ISODate | None = None
+    planting_date_source: Literal["farmer", "state_default", "green_up", "unknown"] = "unknown"
+    diagnosable: bool
+    hail_only: bool = False
+    reasons: list[str] = Field(default_factory=list)
+
+
 class FieldAnalysisResult(Contract):
     schema_version: Literal["1"] = SCHEMA_VERSION
     field: FieldRef
@@ -178,6 +189,7 @@ class FieldAnalysisResult(Contract):
     comparison: OverlayComparison | None = None
     analysis_key: str | None = None
     error: ErrorDetail | None = None
+    crop_state: CropState | None = None
 
 
 # ---------- context and hazards ----------

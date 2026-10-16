@@ -2,13 +2,17 @@
 
 Pattern: agents-as-tools (https://strandsagents.com/docs/user-guide/concepts/multi-agent/agents-as-tools/).
 
+- Evidence comes from code. `evidence.evaluate` resolves every evidence key in the catalog for the field on every run
+  (satellite pattern, soil, weather, hail, drought, county reports, crop stage). The LLMs never choose evidence keys.
 - Specialists (imagery, environment, agronomy) each get a short list of read tools from the registry and return a
-  `contracts.SpecialistResponse` (Strands structured output): evidence items, never a confidence number.
-- Every evidence item the specialists return goes into one `EvidenceLedger`. The supervisor's `score_hypotheses`
-  tool scores the whole ledger through `registry.BY_NAME["score_hypotheses"]`, so the supervisor cannot drop, edit
-  or invent evidence, and the only certainty in the farmer message is the scorer's (docs/decisions.md D7).
-- Fast path (revision R1): `precheck_evidence` scores the precomputed analysis first. If the top hypothesis is at or
-  above FAST_PATH_THRESHOLD the ledger is marked decisive and the specialist tools refuse to run.
+  `contracts.SpecialistResponse` (Strands structured output). They explain what they see and may add evidence only for
+  keys whose catalog source is `photo` or `farmer` (fixed fields); anything else is dropped by the ledger.
+- The `EvidenceLedger` holds the field's inputs, the code's evidence vector and those photo/farmer items. The
+  supervisor's `score_hypotheses` tool scores the whole ledger with `scoring.determine`, so the supervisor cannot drop,
+  edit or invent evidence, and the only certainty in the farmer message is the scorer's tier (docs/decisions.md D7):
+  likely, possible or not determined. "Not determined" is a first-class outcome: it never guesses a cause.
+- Fast path (revision R1): `precheck_evidence` scores the code's evidence first. If a condition is named likely with
+  probability at or above FAST_PATH_THRESHOLD the ledger is marked decisive and the specialist tools refuse to run.
 - The supervisor is the only agent with write tools, and every write tool interrupts for a YES.
 """
 from __future__ import annotations
@@ -28,12 +32,13 @@ from strands import Agent, tool
 from strands.hooks import AfterInvocationEvent, HookProvider, HookRegistry
 from strands.models import BedrockModel, Model
 
-from . import config, scoring
+from . import config, runfacts, scoring
 from . import contracts as C
+from . import evidence as E
 from . import registry
 from . import tools as T
 from .hooks import ToolTimeline
-from .schemas import Diagnosis, how_sure_phrase, scrub_percentages
+from .schemas import (Diagnosis, how_sure_phrase, scrub_figures, scrub_internal_ids, scrub_percentages)
 
 log = logging.getLogger(__name__)
 
@@ -47,10 +52,8 @@ PLAIN_WORDS = (
     "score. Say 'crop health', 'problem area', 'how sure we are'. Use the field name the farmer uses."
 )
 
-# Scorer runs (corn, R2, irrigated unknown..true): strong ring + normal rain scores 0.80-0.94, ring alone 0.73-0.92
-# (0.73-0.77 only when irrigation and stage are unknown); single weaker patterns top out at 0.77 (wedge), 0.75 (sandy),
-# 0.70 (hail overlap), 0.69 (low spots), 0.60 (weak ring). 0.8 fires on a strong ring with context and on no single
-# weak pattern without rain context. Env override kept.
+# A named, uncapped condition at or above this probability is decisive: the specialists are skipped. (Evidence is
+# code-computed, so specialists can only add photo/farmer findings; nothing else can move a decisive answer.)
 FAST_PATH_THRESHOLD = float(os.getenv("FIELDWATCH_FAST_PATH_THRESHOLD", "0.8"))  # implementation-specs "Investigation lifecycle"
 CLOSE_CALL = 0.15  # top two hypotheses this close and unresolved: a photo may help
 SPECIALIST_LIMITS = {"turns": 8}  # specs: 8 tool calls per specialist
@@ -74,70 +77,18 @@ SPECIALIST_JOBS: dict[str, str] = {
     ),
     "environment": (
         "You check whether weather, hail, drought, soil or terrain explain the stress. Compare rain to normal. "
-        "get_field_context has a `water` part (mapped flood zones, streams, wetlands); for ponding use "
-        "floodplain_overlap_high when floodplain_pct is high, outside_floodplain (refutes) when floodplain_pct "
-        "is 0 and flood_zones is not empty (null means unknown), and stream_or_wetland_adjacent when a stream is within about 100 m or wetland_pct is above 0."
+        "get_field_context has a `water` part (mapped flood zones, streams, wetlands). FieldWatch code has already "
+        "scored these; describe what you find in your notes in plain words."
     ),
     "agronomy": (
         "You check disease and pest reports and what the field's history and growth stage imply."
     ),
 }
-# The only weight_keys the scorer knows (catalog/conditions.json); unknown keys are ignored. Grouped by condition.
-WEIGHT_KEYS: dict[str, list[str]] = {
-    "pivot_failure": ["ring_pattern_strong", "ring_pattern_weak", "wedge_pattern_strong", "edge_pattern_strong",
-                      "farmer_reports_pivot_down", "farmer_reports_pivot_ok", "rain_deficit_30d", "rain_normal_30d",
-                      "stress_uniform_field"],
-    "hail": ["hail_mesh_large", "hail_mesh_moderate", "no_hail_mesh", "hail_ground_report_near",
-             "hail_swath_overlap_high", "hail_swath_no_overlap", "photo_leaf_shredding", "sudden_drop_after_storm"],
-    "drought": ["rain_deficit_30d", "rain_normal_30d", "drought_monitor_d1_plus", "drought_monitor_none",
-                "heat_days_over_35c", "stress_uniform_field", "pattern_localized"],
-    "ponding": ["lowspot_overlap_high", "lowspot_overlap_none", "heavy_rain_7d", "rain_excess_30d",
-                "soil_poorly_drained", "soil_well_drained", "photo_standing_water", "floodplain_overlap_high",
-                "stream_or_wetland_adjacent", "outside_floodplain"],
-    "nitrogen": ["rain_excess_30d", "corn_after_corn", "prior_crop_soybeans", "pattern_uniform_pale",
-                 "ndre_low_ndvi_normal", "photo_v_shaped_firing", "farmer_reports_n_short", "farmer_reports_n_full",
-                 "sandy_soil_overlap_high"],
-    "herbicide_drift": ["edge_pattern_strong", "edge_pattern_none", "photo_leaf_cupping", "wind_during_spray_window",
-                        "farmer_reports_neighbor_spray"],
-    "planter_skip": ["stripe_pattern_strong", "stripe_pattern_none", "stripe_width_matches_implement",
-                     "photo_gaps_in_row", "farmer_reports_planter_issue"],
-    "disease_pest": ["disease_confirmed_county", "disease_history_county", "no_disease_reports_county",
-                     "humid_wet_weather_30d", "dry_weather_30d", "patchy_irregular_pattern",
-                     "photo_tar_spot_lesions", "photo_gray_leaf_spot_lesions", "photo_sds_symptoms",
-                     "photo_insect_feeding", "photo_no_lesions"],
-    "sandy_soil_water_stress": ["sandy_soil_overlap_high", "soil_not_sandy", "pattern_follows_soil_zones",
-                                "soil_low_awc", "rain_deficit_30d", "rain_normal_30d"],
-    "unknown": ["no_pattern_found", "clear_pattern_found"],
-}
+# The only weight_keys an LLM may supply evidence for: the catalog keys whose source is photo or farmer, which are read
+# into fixed fields. Every other key is computed by evidence.evaluate.
+WEIGHT_KEYS: dict[str, list[str]] = {c: sorted(k) for c, k in scoring.llm_keys().items() if k}
 WEIGHT_KEY_TEXT = "; ".join(f"{c}: {', '.join(k)}" for c, k in WEIGHT_KEYS.items())
 GROWTH_STAGE_HINT = "Use the growth stage in your reasons only when a tool gave it."
-
-# Evidence the pattern features of a field analysis imply, with the weight_key the catalog should know.
-# (feature, minimum, hypothesis, weight_key, reason)
-PATTERN_RULES: list[tuple[str, float, C.ConditionId, str, str]] = [
-    ("ring_score", 0.6, "pivot_failure", "ring_pattern_strong",
-     "The weak area is a ring on the outer edge, the path of the pivot's last span."),
-    ("ring_score", 0.3, "pivot_failure", "ring_pattern_weak", "The weak area is partly a ring on the outer edge."),
-    ("lowspot_overlap", 0.5, "ponding", "lowspot_overlap_high", "The weak area sits in the low spots of the field."),
-    ("sandy_soil_overlap", 0.5, "sandy_soil_water_stress", "sandy_soil_overlap_high",
-     "The weak area sits on sandy soil."),
-    ("hail_swath_overlap", 0.5, "hail", "hail_swath_overlap_high",
-     "The weak area lines up with where hail fell."),
-    ("wedge_score", 0.6, "pivot_failure", "wedge_pattern_strong",
-     "The weak area is one slice of the circle, the way a failed sprinkler section looks."),
-    ("edge_band_score", 0.6, "herbicide_drift", "edge_pattern_strong",
-     "The weak area runs along one edge of the field."),
-    ("stripe_score", 0.6, "planter_skip", "stripe_pattern_strong", "The weak area is straight parallel bands."),
-]
-# Features that are clearly absent refute the condition they would point to:
-# (feature, below, hypothesis, weight_key, reason)
-ABSENCE_RULES: list[tuple[str, float, C.ConditionId, str, str]] = [
-    ("lowspot_overlap", 0.15, "ponding", "lowspot_overlap_none", "The weak area is not in the low spots."),
-    ("sandy_soil_overlap", 0.15, "sandy_soil_water_stress", "soil_not_sandy", "The weak area is not on sandy soil."),
-    ("stripe_score", 0.2, "planter_skip", "stripe_pattern_none", "There are no straight planter bands."),
-    ("edge_band_score", 0.25, "herbicide_drift", "edge_pattern_none", "The weak area is not along a field edge."),
-]
-UNIFORM_SHARE = 0.7  # the weak area covers this share of the field: stress is field-wide
 
 
 def model() -> Model:
@@ -165,100 +116,77 @@ def _now() -> str:
 
 @dataclass
 class EvidenceLedger:
-    """Everything the specialists found for one investigation, plus the scorer and impact results."""
+    """Everything known about one investigation: the field's inputs, the code's evidence vector, the photo/farmer
+    items the specialists read, and the scorer and impact results."""
 
     investigation_id: str = "inv-local"
     crop: str = "other"
     stage: str | None = None
     irrigated: bool | None = None
-    evidence: list[C.EvidenceItem] = field(default_factory=list)
+    evidence: list[C.EvidenceItem] = field(default_factory=list)  # photo / farmer items only (see `add`)
     score: C.ScoreResult | None = None
+    determination: scoring.Determination | None = None
     impact: C.ImpactEstimate | None = None
     fast_path: bool = False
     called: list[str] = field(default_factory=list)
+    inputs: E.FieldInputs | None = None
+    vector: E.EvidenceVector | None = None
+    rejected: list[str] = field(default_factory=list)  # specialist items dropped because code owns that key
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def add(self, items: list[C.EvidenceItem]) -> list[C.EvidenceItem]:
-        """Add items, skipping ones already counted (same hypothesis, direction and weight key)."""
+        """Add specialist items. Only keys whose catalog source is photo or farmer are accepted, and only in the
+        catalog's direction: every other key is computed in code, so an LLM cannot choose or flip it. Duplicates
+        (same hypothesis and key) count once. Accepted items are rewritten to fixed fields (source and a plain reason)."""
+        allowed, cat = scoring.llm_keys(), scoring.load_catalog().conditions
         added = []
         with self._lock:
-            seen = {(e.hypothesis, e.direction, e.weight_key) for e in self.evidence}
+            seen = {(e.hypothesis, e.weight_key) for e in self.evidence}
             for it in items:
-                key = (it.hypothesis, it.direction, it.weight_key)
-                if key not in seen:
-                    seen.add(key)
-                    self.evidence.append(it)
-                    added.append(it)
+                w = cat[it.hypothesis].weights.get(it.weight_key)
+                if w is None or it.weight_key not in allowed.get(it.hypothesis, ()) or it.direction != w.direction:
+                    self.rejected.append(f"{it.hypothesis}.{it.weight_key}")
+                    continue
+                if (it.hypothesis, it.weight_key) in seen:
+                    continue
+                seen.add((it.hypothesis, it.weight_key))
+                fixed = it.model_copy(update={"source": "photo" if w.source == "photo" else "farmer_reply",
+                                              "reason": " ".join(it.reason.split())[:160] or w.reason})
+                self.evidence.append(fixed)
+                added.append(fixed)
         return added
+
+    def refresh(self) -> E.EvidenceVector | None:
+        """Evaluate every evidence key from the field's inputs (deterministic; the same inputs give the same vector)."""
+        if self.inputs is not None:
+            self.vector = E.evaluate(self.inputs)
+        return self.vector
+
+    def crop_state(self) -> C.CropState | None:
+        return self.inputs.state() if self.inputs is not None else None
 
 
 def top_region(analysis: C.FieldAnalysisResult | dict) -> C.AnomalyRegion | None:
     """The strongest anomaly region of a usable analysis, or None."""
     if isinstance(analysis, dict):
         analysis = C.FieldAnalysisResult.model_validate(analysis)
-    regions = analysis.anomaly.regions if analysis.status == "ok" and analysis.anomaly else []
-    return max(regions, key=lambda r: r.score) if regions else None
+    return E.FieldInputs(analysis=analysis).region()
 
 
-def evidence_from_analysis(
-    analysis: C.FieldAnalysisResult | dict, open_watches: list[dict] | None = None, *, start: int = 1,
-    weather: dict | None = None, field_acres: float | None = None,
-) -> list[C.EvidenceItem]:
-    """Turn a field analysis (pattern features, hail watches, 30-day rain, region size) into evidence, deterministically.
-
-    Uses the strongest anomaly region. This is the "precomputed evidence" the fast path scores before any specialist runs.
-    open_watches: None means hail was not checked; a list (even empty) means it was, so no hail watch is evidence of
-    no hail. weather: optional {rain_in, normal_rain_in}; field_acres: optional field size for the field-wide check.
-    """
-    top = top_region(analysis)
-    items: list[C.EvidenceItem] = []
-
-    def add(hyp, direction, key, source, value, reason):
-        items.append(C.EvidenceItem(
-            evidence_id=f"pre-{start + len(items)}", hypothesis=hyp, direction=direction, weight_key=key,
-            source=source, value=value, reason=reason, created_at=_now()))
-
-    if top is not None:
-        for feat, minimum, hyp, key, reason in PATTERN_RULES:
-            value = getattr(top.features, feat)
-            if value is None or value < minimum:
-                continue
-            if key == "ring_pattern_weak" and value >= 0.6:
-                continue  # a strong ring is not also a weak one
-            add(hyp, "supports", key, "analyze_field", {feat: value}, reason)
-        for feat, below, hyp, key, reason in ABSENCE_RULES:
-            value = getattr(top.features, feat)
-            if value is not None and value < below:
-                add(hyp, "refutes", key, "analyze_field", {feat: value}, reason)
-        overlap = top.features.hail_swath_overlap
-        if overlap is not None and overlap < 0.1:
-            add("hail", "refutes", "hail_swath_no_overlap", "analyze_field", {"hail_swath_overlap": overlap},
-                "The weak area is outside where hail fell.")
-        if field_acres and field_acres > 0 and top.area_acres / field_acres >= UNIFORM_SHARE:
-            share = round(top.area_acres / field_acres, 2)
-            for hyp in ("drought", "pivot_failure"):
-                add(hyp, "supports", "stress_uniform_field", "analyze_field", {"share_of_field": share},
-                    "The weak area covers most of the field.")
-    hail_watches = [w for w in open_watches or [] if w.get("type") == "hail"]
-    for w in hail_watches:
-        add("hail", "supports", "hail_swath_overlap_high", "get_hail", w.get("detail", {}),
-            "Radar showed hail over this field recently.")
-    if open_watches is not None and not hail_watches and top is not None:
-        add("hail", "refutes", "no_hail_mesh", "get_hail", {"open_hail_watches": 0},
-            "No hail was seen over this field.")
-    w30 = weather or {}
-    rain, normal = w30.get("rain_in"), w30.get("normal_rain_in") or w30.get("normal_rain_in_30d")
-    if top is not None and rain is not None and normal:
-        ratio = rain / normal
-        val = {"rain_in": rain, "normal_rain_in": normal}
-        if 0.7 <= ratio <= 1.3:
-            add("pivot_failure", "supports", "rain_normal_30d", "get_weather", val, "Rain was about normal.")
-            add("drought", "refutes", "rain_normal_30d", "get_weather", val, "Rain was about normal.")
-            add("sandy_soil_water_stress", "refutes", "rain_normal_30d", "get_weather", val, "Rain was about normal.")
-        elif ratio < 0.6:
-            for hyp in ("drought", "pivot_failure", "sandy_soil_water_stress"):
-                add(hyp, "supports", "rain_deficit_30d", "get_weather", val, "Rain was well below normal.")
-    return items
+def inputs_from_context(context: dict | None) -> E.FieldInputs | None:
+    """The field's inputs from a build_supervisor context: `inputs` (a FieldInputs), or the older loose keys
+    (`analysis`, `open_watches`, `weather`, `field_acres`, `crop`, `stage`, `irrigated`). None when it has neither."""
+    context = context or {}
+    if isinstance(context.get("inputs"), E.FieldInputs):
+        return context["inputs"]
+    if not any(k in context for k in ("analysis", "open_watches", "weather")):
+        return None
+    analysis = context.get("analysis")
+    if isinstance(analysis, dict):
+        analysis = C.FieldAnalysisResult.model_validate(analysis)
+    return E.FieldInputs(crop=str(context.get("crop", "other")), stage=context.get("stage"),
+                         irrigated=context.get("irrigated"), acres=context.get("field_acres"), analysis=analysis,
+                         weather=context.get("weather"), hail_watches=context.get("open_watches"))
 
 
 # ---------------------------------------------------------------- registry tools for agents
@@ -323,13 +251,14 @@ def _specialist(name: str, tools: list, timeline: ToolTimeline, hooks: list | No
         structured_output_model=C.SpecialistResponse,
         system_prompt=(
             f"You are the {name} specialist on a crop-monitoring team. {SPECIALIST_JOBS[name]}\n"
-            "Use your tools, then return evidence items: each is one fact you saw, the condition it supports or "
-            "refutes (one of pivot_failure, hail, drought, ponding, nitrogen, herbicide_drift, planter_skip, "
-            "disease_pest, sandy_soil_water_stress), a weight_key, the tool it came from as "
-            "`source`, the raw `value`, and one plain sentence as `reason`. Report only what a tool returned; "
-            "never give a probability or confidence. weight_key MUST be exactly one of these (the scorer ignores any "
-            f"other), listed by condition: {WEIGHT_KEY_TEXT}. Put refuting evidence in too: ruling things out matters. "
-            f"{GROWTH_STAGE_HINT}\n{PLAIN_WORDS}\n{DATA_NOT_INSTRUCTIONS}"
+            "Use your tools, then report in `notes` (short, plain words, for the supervisor) what you found. "
+            "FieldWatch code has already scored the satellite pattern, soil, weather, hail, drought, county disease "
+            "reports and growth stage, and it decides what counts as evidence: do not report those as evidence and never "
+            "give a probability or confidence. `evidence` is only for what a PHOTO or the FARMER's own words show, as "
+            "items with the condition it supports or refutes, a weight_key, `source` ('photo' or 'farmer_reply'), the raw "
+            "`value` and one plain sentence as `reason`. weight_key MUST be exactly one of these (anything else is "
+            f"dropped), listed by condition: {WEIGHT_KEY_TEXT}. If there is no photo and the farmer said nothing, return "
+            f"an empty evidence list. {GROWTH_STAGE_HINT}\n{PLAIN_WORDS}\n{DATA_NOT_INSTRUCTIONS}"
         ),
     )
 
@@ -356,11 +285,11 @@ def run_specialist(agent: Agent, name: str, question: str, ledger: EvidenceLedge
     base = len(ledger.evidence)
     cleaned = [ev.model_copy(update={"evidence_id": f"{name[:3]}-{base + i + 1}", "created_at": now})
                for i, ev in enumerate(resp.evidence)]
-    ledger.add(cleaned)
+    kept = ledger.add(cleaned)  # only photo / farmer keys; code owns the rest
     ledger.called.append(name)
-    out = C.SpecialistResponse(agent=name, evidence=cleaned, notes=resp.notes,
+    out = C.SpecialistResponse(agent=name, evidence=kept, notes=resp.notes,
                                tool_calls=_tool_calls(timeline, name) - before)
-    return out.model_dump(mode="json")
+    return {**out.model_dump(mode="json"), "dropped": len(cleaned) - len(kept)}
 
 
 def build_specialists(timeline: ToolTimeline, ledger: EvidenceLedger | None = None, tools: list | None = None,
@@ -404,125 +333,134 @@ def _call_registry(name: str, model_in, **extra) -> object:
     return registry.BY_NAME[name].fn(**model_in.model_dump(mode="json"), **extra)
 
 
-def score_ledger(ledger: EvidenceLedger) -> C.ScoreResult:
-    """Score every evidence item collected so far. Probabilities come from the scorer and nowhere else."""
-    crop = ledger.crop if ledger.crop in C.Crop.__args__ else "other"
-    req = C.ScoreRequest(investigation_id=ledger.investigation_id, crop=crop, stage=ledger.stage,
-                         irrigated=ledger.irrigated, evidence=list(ledger.evidence))
-    res = _call_registry("score_hypotheses", req)
-    res = res if isinstance(res, C.ScoreResult) else C.ScoreResult.model_validate(res)
-    ledger.score = res
-    return res
+def score_ledger(ledger: EvidenceLedger) -> scoring.Determination:
+    """Score everything known so far: the code's evidence vector (when the field's inputs are known) plus the photo
+    and farmer items the specialists read. The tier and the probabilities come from the scorer and nowhere else."""
+    if ledger.inputs is not None:
+        vec = ledger.refresh()
+        req = E.score_request(ledger.inputs, vec, ledger.evidence, ledger.investigation_id)
+        crop_state = ledger.inputs.state()
+    else:
+        crop = ledger.crop if ledger.crop in C.Crop.__args__ else "other"
+        req = C.ScoreRequest(investigation_id=ledger.investigation_id, crop=crop, stage=ledger.stage,
+                             irrigated=ledger.irrigated, evidence=list(ledger.evidence))
+        crop_state = None
+    det = scoring.determine(req, crop_state=crop_state)
+    ledger.determination = det
+    ledger.score = scoring.result_of(det, req)
+    return det
 
 
 def score_reasons(ledger: EvidenceLedger, top_n: int = 3) -> dict:
-    """Why the scorer ranked what it did, in the evidence's own plain words (scoring.explain): the reasons that
-    pushed the top condition up and down the most, and the strongest reason each other condition lost out. This is
-    what lets the agent and the farmer-facing text justify a conclusion instead of just quoting a percent."""
-    if not ledger.evidence:
-        return {}
-    crop = ledger.crop if ledger.crop in C.Crop.__args__ else "other"
-    try:
-        detail = scoring.explain(C.ScoreRequest(investigation_id=ledger.investigation_id, crop=crop,
-                                                stage=ledger.stage, irrigated=ledger.irrigated,
-                                                evidence=list(ledger.evidence)))
-        labels = scoring.load_catalog().conditions
-    except Exception:  # noqa: BLE001 - reasons are a nice-to-have; the score itself already succeeded
-        log.warning("could not explain the score", exc_info=True)
-        return {}
-    if not detail:
+    """Why the scorer ranked what it did, in the evidence's own plain words: the reasons that pushed the leading
+    condition up and down the most, and what was ruled out. This is what lets the agent and the farmer-facing text
+    justify a conclusion instead of just quoting a number."""
+    det = ledger.determination
+    if det is None:
         return {}
 
     def plain(text: str) -> str:
         return " ".join(str(text).split())[:160]
 
-    ranked = sorted(detail.items(), key=lambda kv: kv[1]["probability"], reverse=True)
-    top_id, top = ranked[0]
-    out = {
-        "top_condition": top_id,
-        "for": [plain(a["reason"]) for a in top["applied"] if a["delta_log_odds"] > 0][:top_n],
-        "against": [plain(a["reason"]) for a in top["applied"] if a["delta_log_odds"] < 0][:2],
-        "ruled_out": [],
-    }
-    for cid, d in ranked[1:]:
-        down = [a for a in d["applied"] if a["delta_log_odds"] < 0]
-        if down and cid != "unknown" and (d["status"] == "ruled_out" or d["probability"] < 0.2):
-            out["ruled_out"].append({"condition": labels[cid].label if cid in labels else cid,
-                                     "reason": plain(down[0]["reason"])})
-    out["ruled_out"] = out["ruled_out"][:3]
-    return out
-
-
-def score_payload(res: C.ScoreResult) -> dict:
-    """What the supervisor reads: scorer probabilities as whole percents, ranked, and the plain 'how sure'."""
-    ranked = sorted(res.hypotheses, key=lambda h: h.probability, reverse=True)
-    top = ranked[0] if ranked else None
+    top_id = det.condition or (det.top.condition if det.top else None)
+    if top_id is None:
+        return {"top_condition": None, "for": [], "against": [], "ruled_out": det.ruled_out()}
+    d = det.detail[top_id]
     return {
-        "hypotheses": [{"condition": h.condition, "percent": round(h.probability * 100), "status": h.status}
-                       for h in ranked],
-        "top_condition": top.condition if top else None,
-        "how_sure": how_sure_phrase(top.probability) if top else "not sure yet",
-        "close_call": bool(len(ranked) > 1 and ranked[0].probability - ranked[1].probability < CLOSE_CALL),
-        "catalog_version": res.catalog_version,
+        "top_condition": top_id,
+        "for": [plain(a["reason"]) for a in d["applied"] if a["delta_log_odds"] > 0][:top_n],
+        "against": [plain(a["reason"]) for a in d["applied"] if a["delta_log_odds"] < 0][:2],
+        "ruled_out": det.ruled_out(),
+    }
+
+
+def score_payload(det: scoring.Determination, ledger: EvidenceLedger | None = None) -> dict:
+    """What the supervisor reads: the outcome tier, the named condition (if any), the leading candidates, what was ruled
+    out, what to scout, and the plain 'how sure'. `percent` is the scorer's probability for the record only: farmer
+    text uses the tier."""
+    cat = scoring.load_catalog().conditions
+    ranked = sorted(((cid, d) for cid, d in det.detail.items() if cid != "unknown"),
+                    key=lambda kv: (-kv[1]["probability"], kv[0]))
+    tiers = {c.condition: c.tier for c in det.candidates}
+    open_p = [d["probability"] for _, d in ranked if d["status"] == "open"]
+    inputs = ledger.inputs if ledger is not None else None
+    return {
+        "outcome": det.outcome,
+        "top_condition": det.condition,
+        "how_sure": how_sure_phrase(det.outcome),
+        "hypotheses": [{"condition": cid, "percent": round(d["probability"] * 100),
+                        "status": "likely" if cid == det.condition and det.outcome == "likely" else d["status"],
+                        "tier": tiers.get(cid)} for cid, d in ranked],
+        "possible": [{"condition": c.condition, "label": c.label} for c in det.candidates if not c.named or c.tier == "possible"],
+        "ruled_out": det.ruled_out(),
+        "scout_for": [c.scout_for for c in det.candidates if c.scout_for][:2],
+        "close_call": bool(len(open_p) > 1 and open_p[0] - open_p[1] < CLOSE_CALL),
+        "situation": E.situation(inputs) if inputs is not None else "ok",
+        "catalog_version": det.catalog_version,
     }
 
 
 def build_scoring_tools(ledger: EvidenceLedger, context: dict | None = None) -> list:
     context = context or {}
+    if ledger.inputs is None:
+        ledger.inputs = inputs_from_context(context)
+    if ledger.inputs is not None:
+        ledger.crop = ledger.inputs.crop if ledger.crop == "other" else ledger.crop
+        ledger.stage = ledger.stage or ledger.inputs.stage_label()
+        ledger.irrigated = ledger.inputs.irrigated if ledger.irrigated is None else ledger.irrigated
 
     @tool
     def precheck_evidence(field_id: str = "") -> str:
-        """FIRST STEP. Score the precomputed evidence for this field (pattern analysis and open watches). If the
-        answer is decisive the result says fast_path true: skip the specialists and go to impact."""
-        analysis = context.get("analysis")
-        items: list[C.EvidenceItem] = []
-        if analysis is not None:
-            try:
-                items = evidence_from_analysis(
-                    analysis, context.get("open_watches"), weather=context.get("weather"),
-                    field_acres=context.get("field_acres"))
-            except ValidationError as exc:
-                return json.dumps({"fast_path": False, "note": f"precomputed analysis unusable: {exc.error_count()} errors"})
-        if not items:
+        """FIRST STEP. Weigh everything FieldWatch can work out from the satellite pass, soil, weather, hail, drought,
+        county reports and growth stage. Returns the outcome (likely, possible or not_determined), the named cause if
+        any, what is possible, what was ruled out and what to scout. If fast_path is true the answer is decisive: skip
+        the specialists and go to impact."""
+        if ledger.inputs is None:
             return json.dumps({"fast_path": False, "note": "no precomputed evidence; ask the specialists"})
-        ledger.add(items)
-        payload = score_payload(score_ledger(ledger))
-        probs = sorted((h.probability for h in ledger.score.hypotheses), reverse=True) + [0.0, 0.0]
-        # decisive: high enough, the runner-up is not a close call, and no rival is itself "likely" (an open hail
-        # watch next to a ring, say, needs the specialists)
-        ledger.fast_path = (probs[0] >= FAST_PATH_THRESHOLD and probs[0] - probs[1] >= CLOSE_CALL
-                            and probs[1] <= scoring.LIKELY_ABOVE)
-        return json.dumps({**payload, "why": score_reasons(ledger), "fast_path": ledger.fast_path})
+        det = score_ledger(ledger)
+        payload = score_payload(det, ledger)
+        # decisive: a condition named likely, high enough, no close call and no other condition that is itself
+        # strong enough to be named (a hail report next to a ring, say, needs the specialists)
+        rivals = [d for cid, d in det.detail.items() if cid not in (det.condition, "unknown") and d["status"] == "open"
+                  and d["probability"] >= scoring.NAME_THRESHOLD]
+        ledger.fast_path = (det.outcome == "likely" and (det.probability or 0) >= FAST_PATH_THRESHOLD
+                            and not payload["close_call"] and not rivals)
+        return json.dumps({**payload, "why": score_reasons(ledger), "fast_path": ledger.fast_path,
+                           "not_checked": sorted(ledger.vector.not_evaluable())[:12] if ledger.vector else []})
 
     @tool
     def score_hypotheses(crop: str = "", stage: str = "", irrigated: bool | None = None) -> str:
-        """Score every piece of evidence gathered so far. Call it after the specialists answer, and again if new
-        evidence arrives. Returns each condition's percent and status, how_sure wording and close_call. Use ONLY
-        these numbers and this wording for how sure we are."""
-        if crop:
-            ledger.crop = crop
-        if stage:
-            ledger.stage = stage
-        if irrigated is not None:
-            ledger.irrigated = irrigated
-        return json.dumps({**score_payload(score_ledger(ledger)), "why": score_reasons(ledger),
-                           "evidence_count": len(ledger.evidence)})
+        """Score all the evidence gathered so far. Call it after the specialists answer, and again if new evidence
+        arrives. Returns the outcome (likely, possible or not_determined), the named cause if any, what is possible,
+        what was ruled out, what to scout and the how_sure wording. Use ONLY this outcome and wording for how sure we
+        are, and never quote a percent."""
+        if ledger.inputs is None:  # without the field's inputs the model's crop/stage are all there is
+            if crop:
+                ledger.crop = crop
+            if stage:
+                ledger.stage = stage
+            if irrigated is not None:
+                ledger.irrigated = irrigated
+        det = score_ledger(ledger)
+        return json.dumps({**score_payload(det, ledger), "why": score_reasons(ledger),
+                           "evidence_count": len(ledger.evidence) + (len(ledger.vector.present()) if ledger.vector else 0)})
 
     @tool
     def estimate_impact(field_id: str, condition: str, affected_acres: float = 0.0, severity: str = "medium",
                         days_until_fixed: int = 7, stage: str = "", crop: str = "",
                         expected_yield: float | None = None, price: float | None = None) -> str:
-        """Dollar range at stake for the likely condition on the affected acres, from published loss tables.
+        """Dollar range at stake for the named condition on the affected acres, from published loss tables.
         condition is a condition id from the score result. Pass crop, expected_yield and price from the field
         when you know them. Use these dollar figures as given."""
         acres = affected_acres
-        if context.get("analysis") is not None:  # acres are the top region's area, never the model's guess
+        region = ledger.inputs.region() if ledger.inputs is not None else None
+        if region is None and context.get("analysis") is not None:
             try:
                 region = top_region(context["analysis"])
             except ValidationError:
                 region = None
-            if region is not None:
-                acres = region.area_acres
+        if region is not None:  # acres are the top region's area, never the model's guess
+            acres = region.area_acres
         req = C.ImpactRequest(field_id=field_id, condition=condition, affected_acres=acres,
                               stage=stage or ledger.stage, severity=severity, days_until_fixed=days_until_fixed)
         extra = {"crop": crop or (ledger.crop if ledger.crop != "other" else "corn")}
@@ -533,6 +471,9 @@ def build_scoring_tools(ledger: EvidenceLedger, context: dict | None = None) -> 
         res = _call_registry("estimate_impact", req, **extra)
         res = res if isinstance(res, C.ImpactEstimate) else C.ImpactEstimate.model_validate(res)
         ledger.impact = res
+        facts = runfacts.current()
+        if facts is not None:  # the figures a pin, a work order and the diagnosis may state
+            facts.acres, facts.low_usd, facts.high_usd = res.affected_acres, res.low_usd, res.high_usd
         return json.dumps({"low_usd": res.low_usd, "high_usd": res.high_usd, "affected_acres": res.affected_acres,
                            "basis": res.basis})
 
@@ -568,14 +509,18 @@ def _json_or_none(text):
     return text if isinstance(text, dict) else None
 
 
-def _tool_payloads(messages: list, tool_name: str) -> list[dict]:
-    """Dict payloads of every result of `tool_name`, oldest first, from text or json content blocks."""
+SCORING_TOOLS = ("precheck_evidence", "score_hypotheses")  # both return the scorer's payload (fast path: only the first)
+
+
+def _tool_payloads(messages: list, tool_name: str | tuple[str, ...]) -> list[dict]:
+    """Dict payloads of every result of `tool_name` (or any of several), oldest first, from text or json content blocks."""
+    wanted = (tool_name,) if isinstance(tool_name, str) else tuple(tool_name)
     names, out = {}, []
     for m in messages or []:
         for c in m.get("content", []):
             if "toolUse" in c:
                 names[c["toolUse"]["toolUseId"]] = c["toolUse"]["name"]
-            if "toolResult" in c and _bare(names.get(c["toolResult"]["toolUseId"], "")) == tool_name:
+            if "toolResult" in c and _bare(names.get(c["toolResult"]["toolUseId"], "")) in wanted:
                 for x in c["toolResult"].get("content", []):
                     p = _json_or_none(x["json"]) if "json" in x else _json_or_none(x["text"]) if "text" in x else None
                     if p is not None:
@@ -584,10 +529,14 @@ def _tool_payloads(messages: list, tool_name: str) -> list[dict]:
 
 
 class DiagnosisGuard(HookProvider):
-    """After the supervisor answers: every number comes from the scorer and impact tools, never the model.
-    Hypotheses, condition, how_sure, acres and dollars are overwritten from the last score and impact results, and
-    any percentage the scorer did not produce is removed from the farmer-facing words. Reads tool results from the
-    conversation, so it still works when a reply resumes the investigation in a fresh agent."""
+    """After the supervisor answers: every number and every fact comes from code, never the model.
+
+    Hypotheses, condition, outcome tier, how_sure, acres and dollars are overwritten from the last score and impact
+    results; the location is the flagged region's `where` (runfacts); percentages are removed from the farmer-facing
+    words, as are internal ids and any acres or dollar figure the impact tool did not produce. When the scorer could
+    not name a cause the words are written here, from the score: weak area, what was ruled out, what is possible, and a
+    scouting pin to find out. Reads tool results from the conversation, so it still works when a reply resumes the
+    investigation in a fresh agent."""
 
     def register_hooks(self, registry_: HookRegistry, **kwargs) -> None:
         registry_.add_callback(AfterInvocationEvent, self.after)
@@ -598,32 +547,75 @@ class DiagnosisGuard(HookProvider):
         if not isinstance(diag, Diagnosis):
             return
         messages = event.agent.messages
-        scores = [p for p in _tool_payloads(messages, "score_hypotheses") if isinstance(p.get("hypotheses"), list)]
+        facts = runfacts.current()
+        scores = [p for p in _tool_payloads(messages, SCORING_TOOLS) if isinstance(p.get("hypotheses"), list)]
         impacts = [p for p in _tool_payloads(messages, "estimate_impact") if "low_usd" in p and "high_usd" in p]
-        allowed = {h["percent"] for s in scores for h in s["hypotheses"] if "percent" in h}
-        diag.hypotheses, diag.condition = [], None
-        if scores:
-            last = scores[-1]
+        diag.hypotheses, diag.condition, diag.outcome, diag.possible = [], None, None, []
+        last = scores[-1] if scores else None
+        if last is not None:
             for h in last["hypotheses"]:
                 try:
                     diag.hypotheses.append(C.Hypothesis(condition=h["condition"], probability=h["percent"] / 100,
                                                         status=h.get("status", "open")))
                 except (KeyError, TypeError, ValueError, ValidationError):
                     continue
-            top = last.get("top_condition") or (diag.hypotheses[0].condition if diag.hypotheses else None)
-            diag.condition = top if top in typing.get_args(C.ConditionId) else None
+            outcome = last.get("outcome")
+            top = last.get("top_condition") or (diag.hypotheses[0].condition if diag.hypotheses and outcome is None else None)
+            if outcome in ("likely", "possible", "not_determined"):
+                diag.outcome = outcome
+            if outcome == "not_determined":
+                diag.condition = "unknown"
+            else:
+                diag.condition = top if top in typing.get_args(C.ConditionId) else None
             if last.get("how_sure"):
                 diag.how_sure = last["how_sure"]
+            if outcome is not None and last.get("ruled_out") is not None:
+                diag.ruled_out = [str(r.get("condition", "")).lower() for r in last["ruled_out"] if isinstance(r, dict)][:3]
         if impacts:
-            last = impacts[-1]
-            diag.dollars_low, diag.dollars_high = round(last["low_usd"]), round(last["high_usd"])
-            diag.affected_acres = last.get("affected_acres")
+            last_i = impacts[-1]
+            diag.dollars_low, diag.dollars_high = round(last_i["low_usd"]), round(last_i["high_usd"])
+            diag.affected_acres = last_i.get("affected_acres")
         else:  # no impact estimate: do not keep numbers the model made up
             diag.dollars_low = diag.dollars_high = 0
             diag.affected_acres = None
+        if facts is not None and facts.where:
+            diag.where = facts.where  # the location comes from the flagged region, not from the model
+        if diag.outcome == "not_determined" and last is not None:
+            self._not_determined(diag, last, facts)
         for f in ("what", "where", "why", "action_detail"):
-            setattr(diag, f, scrub_percentages(getattr(diag, f), allowed))
-        diag.ruled_out = [scrub_percentages(x, allowed) for x in diag.ruled_out]
+            setattr(diag, f, self._clean(getattr(diag, f), diag))
+        diag.ruled_out = [self._clean(x, diag) for x in diag.ruled_out]
+        diag.possible = [self._clean(x, diag) for x in diag.possible]
+
+    @staticmethod
+    def _clean(text: str, diag: Diagnosis) -> str:
+        text = scrub_percentages(text, set())
+        text = scrub_internal_ids(text)
+        return scrub_figures(text, acres=diag.affected_acres, low_usd=diag.dollars_low or None,
+                             high_usd=diag.dollars_high or None)
+
+    @staticmethod
+    def _not_determined(diag: Diagnosis, score: dict, facts: runfacts.RunFacts | None) -> None:
+        """The words of a diagnosis nobody could name, written from the score."""
+        situation = score.get("situation", "ok")
+        diag.dollars_low = diag.dollars_high = 0  # no cause, no loss estimate
+        if facts is not None and facts.region_acres and diag.affected_acres is None:
+            diag.affected_acres = facts.region_acres
+        diag.possible = [str(p.get("label", "")) for p in score.get("possible", []) if isinstance(p, dict)][:3]
+        if situation in ("no_problem_area", "no_analysis", "no_clear_pass"):
+            diag.what = {"no_problem_area": "No problem area found in the latest satellite pass",
+                         "no_analysis": "No recent satellite check is on file yet",
+                         "no_clear_pass": "The latest satellite pass was too cloudy to check"}[situation]
+            diag.why, diag.recommended_action = "Nothing to scout right now", "none"
+            diag.action_detail = "Nothing to do. FieldWatch checks again on the next clear pass."
+            diag.possible = []
+            return
+        where = f" in the {diag.where.rstrip('.')}" if diag.where and diag.where.lower() not in ("unknown", "") else ""
+        diag.what = f"Weak area{where}, cause not determined"
+        diag.why = "Nothing in the data points to one cause yet"
+        diag.recommended_action = "scouting_pin"
+        scout = [s for s in score.get("scout_for", []) if s] or ([facts.scout_for] if facts and facts.scout_for else [])
+        diag.action_detail = ("Walk the spot and look for " + "; or ".join(scout)) if scout else "Walk the spot and note what you see"
 
 
 # ---------------------------------------------------------------- supervisor
@@ -631,37 +623,43 @@ class DiagnosisGuard(HookProvider):
 SUPERVISOR_PROMPT = f"""You are FieldWatch, watching a family farm's fields from satellite.
 
 For the field you are asked about (call list_fields once to get its id, then use the id everywhere):
-1. Call precheck_evidence. If it says fast_path true, the answer is already clear: skip steps 2 and 3.
-2. Ask the imagery specialist what the stress pattern looks like. Ask the environment specialist about weather,
-   hail, drought, soil and terrain. Ask the agronomy specialist about disease and pests. Ask all three every
-   time you are not on the fast path, even when the field looks healthy. Include the field id in each question.
-   You may only say something is ruled out after the score shows it as ruled_out.
-3. Call score_hypotheses. It scores all the evidence the specialists returned.
-4. Call estimate_impact for the most likely condition, using the problem-area acres from the evidence, for a
-   dollar range.
-5. Decide one action: a repair work order to the person who does repairs, or a scouting pin (someone walks the
-   spot) when the score says close_call or the cause needs eyes on the ground. Propose the action by CALLING its
-   tool (create_work_order or create_scout_pin), never by just asking in text: the call is what pauses
-   for the farmer's YES. If the field is genuinely fine, skip the action and say so.
+1. Call precheck_evidence. FieldWatch code has already weighed every kind of evidence it can (the satellite pattern,
+   soil, weather, hail, drought, county reports, growth stage). It returns `outcome`: likely, possible or
+   not_determined, plus `top_condition` (only when a cause is named), `possible` candidates, `ruled_out`, `scout_for`
+   and `fast_path`. If fast_path is true, the answer is already clear: skip steps 2 and 3.
+2. Not on the fast path: ask the imagery, environment and agronomy specialists what they see. Include the field id in
+   each question. They cannot change the code's findings; they add only what a photo or the farmer's words show.
+   You may only say something is ruled out when `ruled_out` lists it.
+3. Call score_hypotheses. It scores the code's evidence and whatever the specialists added.
+4. When the outcome is likely or possible, call estimate_impact for `top_condition`, using the problem-area acres, for
+   a dollar range. When it is not_determined, skip the dollar range.
+5. Decide one action by CALLING its tool (create_work_order or create_scout_pin), never by just asking in text: the
+   call is what pauses for the farmer's YES.
+   - likely: a repair work order to the person who does repairs, or a scouting pin when the cause needs eyes on the ground;
+   - possible: a scouting pin to confirm (say so: "possible", never "likely");
+   - not_determined: a scouting pin using `scout_for`. NEVER guess a cause. Say the cause is not determined, what was
+     ruled out, and what is possible.
+   If the field is genuinely fine (situation says no problem area), skip the action and say so.
 6. Then produce the diagnosis. Keep "what" and "why" to one short sentence each; the farmer reads this
-   as a text message. Build "why" from the `why.for` reasons score_hypotheses returned (the evidence that
-   actually moved the score), and put `why.ruled_out` conditions with their reason in "ruled_out", so the
-   farmer sees what we checked, not just a conclusion.
+   as a text message of about 320 characters. Build "why" from the `why.for` reasons score_hypotheses returned (the
+   evidence that actually moved the score), and put the `ruled_out` conditions in "ruled_out", so the farmer sees
+   what we checked, not just a conclusion.
 
 Use send_farmer_message only to text someone on the farm directly (for example an urgent heads-up); the
 question for the farmer and your final diagnosis are sent for you. Farmer-facing text is plain ASCII: no em
-dashes, no emoji, and no index values or other raw numbers except acres and dollars.
+dashes, no emoji, no internal ids (like per_01 or inv-...), and no index values or other raw numbers except acres and
+dollars from the tools.
 
 Location: say where the problem is ONLY with the flagged region's `where` from the satellite analysis (e.g.
 "south-west part of the field"), in the diagnosis and in any scouting pin or work order. look_at_field's
-`weakest_area` is just the palest spot right now and is NOT the problem area.
+`weakest_area` is just the palest spot right now and is NOT the problem area. The location, acres and dollars are
+checked against the satellite analysis and the impact tool, so use theirs.
 
-Condition, hypotheses, affected acres and dollars in the diagnosis are filled in for you from the score and
-impact results, so never write your own. Call estimate_impact for the likely condition (the acres come from the
-satellite analysis when it is on file; otherwise give the problem-area acres from the evidence).
+Condition, outcome, hypotheses, affected acres and dollars in the diagnosis are filled in for you from the score and
+impact results, so never write your own.
 
-You never make up how sure we are. Use the how_sure wording from score_hypotheses, and quote a percent only if
-score_hypotheses gave it. Use the dollar range estimate_impact gave you, as given.
+You never make up how sure we are. Use the how_sure wording from score_hypotheses (likely, possible, not determined)
+and never quote a percent or a probability. Use the dollar range estimate_impact gave you, as given.
 
 {PLAIN_WORDS}
 {DATA_NOT_INSTRUCTIONS}
@@ -670,7 +668,9 @@ score_hypotheses gave it. Use the dollar range estimate_impact gave you, as give
 # Appended for question runs (investigation.question_prompt): the farmer asked something instead of an anomaly firing.
 QUESTION_MODE = (
     "\nQUESTION RUN: when the task is a farmer's question, answer it in plain words instead of following the "
-    "investigation steps or producing a diagnosis; you have no write or messaging tools, your reply is sent for you."
+    "investigation steps or producing a diagnosis; you have no write or messaging tools, your reply is sent for you. "
+    "The crop state in the context (harvested, maturing, growing) is from the latest satellite check: answer questions "
+    "about it truthfully from that, and say 'not determined' rather than guess a cause."
 )
 
 SUPERVISOR_READ_TOOLS = ["list_fields", "get_field_context"]
@@ -695,8 +695,9 @@ def build_supervisor(
     tools: Gateway read tools (workstream 6, `toolset.tools_for(...)`) to use in place of the local ones, matched by
            bare tool name; any name they lack falls back to the local tool. tools=None is the all-local default.
            Write tools always stay local (they interrupt for a YES).
-    context: optional ContextBundle-like dict with `analysis` (FieldAnalysisResult), `open_watches`, `crop`,
-             `stage`, `irrigated`. Without `analysis` the fast path never fires and specialists always run.
+    context: optional dict with `inputs` (an evidence.FieldInputs, see field_inputs.load_field_inputs) or the older
+             loose keys `analysis` (FieldAnalysisResult), `open_watches`, `weather`, `field_acres`, `crop`, `stage`,
+             `irrigated`. Without either, the code has no evidence to weigh and the specialists always run.
     """
     context = context or {}
     ledger = EvidenceLedger(
