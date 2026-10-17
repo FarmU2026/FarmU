@@ -14,7 +14,7 @@ from datetime import date, timedelta
 from strands import tool
 from strands.types.tools import ToolContext, ToolResult
 
-from . import actions, approvals, farmdata, interfaces, openmeteo
+from . import actions, approvals, farmdata, interfaces, openmeteo, runfacts, schemas
 from . import contracts as C
 from .contracts import Approval
 
@@ -203,31 +203,59 @@ def _lon_lat(f: dict) -> tuple[float, float]:
     return round(lon, 6), round(lat, 6)
 
 
+def _run_facts() -> runfacts.RunFacts | None:
+    return runfacts.current()
+
+
+def _pin_of(f: dict) -> tuple[float, float]:
+    """Where the pin goes: the flagged region's centroid when the run knows it, else the middle of the field."""
+    facts = _run_facts()
+    if facts is not None and facts.centroid:
+        return round(facts.centroid[0], 6), round(facts.centroid[1], 6)
+    return _lon_lat(f)
+
+
+def _plain_text(text: str) -> str:
+    """The model's words for a pin or work order with the facts only code may state removed: ids, percents, and any
+    acres or dollars other than the impact tool's."""
+    facts = _run_facts()
+    out = schemas.scrub_internal_ids(str(text))
+    out = schemas.scrub_percentages(out, set())
+    return schemas.scrub_figures(out, acres=facts.acres if facts else None, low_usd=facts.low_usd if facts else None,
+                                 high_usd=facts.high_usd if facts else None)
+
+
 @tool(context=True)
 def create_work_order(field_id: str, assignee: str, what_to_check: str, tool_context: ToolContext) -> str:
     """Send a repair work order with a map pin to the person who does repairs. Requires farmer approval."""
     f = _field(field_id)
-    summary = f"Send {assignee} a repair ticket for the {f['name']}: {what_to_check}"
+    facts = _run_facts()
+    where = f" ({facts.where})" if facts and facts.where else ""
+    check = _plain_text(what_to_check)
+    summary = f"Send {assignee} a repair ticket for the {f['name']}{where}: {check}"
     a = _approve(tool_context, "work_order", summary)
     if a.status != "approved":
         return _not_approved(a, "work order")
     try:
         act = actions.create_work_order(
             approval_id=a.approval_id, investigation_id=a.investigation_id, assignee_person_id=assignee,
-            field_id=f["id"], field_name=f["name"], instructions=what_to_check, pin=_lon_lat(f),
+            field_id=f["id"], field_name=f["name"], instructions=check, pin=_pin_of(f),
             farm_id=_farm().get("farm_id"))
     except approvals.FieldwatchError as e:
         return f"Not sent: {e.message}"
-    order = {"id": act.action_id, "to": assignee, "field": f["name"], "check": what_to_check,
+    order = {"id": act.action_id, "to": assignee, "field": f["name"], "check": check,
              "text_delivered": actions.delivery(act.action_id)["delivered"]}
     return f"Work order sent: {json.dumps(order)}"
 
 
 @tool(context=True)
 def create_scout_pin(field_id: str, where: str, what_to_look_for: str, tool_context: ToolContext) -> str:
-    """Drop a scouting pin with coordinates and what to look for. Requires farmer approval."""
+    """Drop a scouting pin with coordinates and what to look for. Requires farmer approval. The location is the
+    flagged problem area's, set by FieldWatch."""
     f = _field(field_id)
-    look = re.sub(r"^\s*look for:?\s*", "", str(what_to_look_for), flags=re.I)  # the agent often repeats "Look for:"
+    facts = _run_facts()
+    where = facts.where if facts and facts.where else _plain_text(where)  # location: code's, not the model's
+    look = re.sub(r"^\s*look for:?\s*", "", _plain_text(what_to_look_for), flags=re.I)  # the agent often repeats "Look for:"
     summary = f"Scouting pin on the {f['name']} ({where}): look for {look}"
     a = _approve(tool_context, "scout_pin", summary)
     if a.status != "approved":
@@ -235,11 +263,11 @@ def create_scout_pin(field_id: str, where: str, what_to_look_for: str, tool_cont
     try:
         act = actions.create_scout_pin(
             approval_id=a.approval_id, investigation_id=a.investigation_id, person_id=_farmer_id(),
-            pin=_lon_lat(f), what_to_check=f"{where}: {what_to_look_for}", field_name=f["name"],
+            pin=_pin_of(f), what_to_check=f"{where}: {look}", field_name=f["name"],
             farm_id=_farm().get("farm_id"))
     except approvals.FieldwatchError as e:
         return f"Not sent: {e.message}"
-    return f"Scouting pin sent for {f['name']}: {where}. Look for: {what_to_look_for}. (pin {act.action_id})"
+    return f"Scouting pin sent for {f['name']}: {where}. Look for: {look}."  # no internal ids in text the farmer may see
 
 
 @tool(context=True)
@@ -280,7 +308,8 @@ def send_farmer_message(person_id: str, body: str, investigation_id: str = "", u
     name the farmer uses. person_id from the farm's people (the farmer is the default). urgency: low,
     actionable or urgent (urgent skips quiet hours)."""
     try:
-        res = deliver_message(person_id=person_id or _farmer_id(), body=body, investigation_id=investigation_id or None,
+        res = deliver_message(person_id=person_id or _farmer_id(), body=schemas.farmer_text(body),
+                              investigation_id=investigation_id or None,
                               urgency=urgency if urgency in ("low", "actionable", "urgent") else "actionable")
     except interfaces.FieldwatchError as e:
         return {"status": "error", "code": e.code, "message": e.message}

@@ -86,9 +86,10 @@ def test_thresholds():
     assert by_cond(low)["hail"].probability < 0.05 and by_cond(low)["hail"].status == "ruled_out"
     high = scoring.score_hypotheses(C.ScoreRequest(investigation_id="i", crop="corn", evidence=[
         ev(1, "hail", "supports", "hail_mesh_large"), ev(2, "hail", "supports", "hail_swath_overlap_high")]))
-    assert by_cond(high)["hail"].probability > 0.6 and by_cond(high)["hail"].status == "likely"
+    # "likely" is the outcome of the naming rule, not a probability band: here hail has a field-evidence item
+    # (radar over the field) and is inside its stage window only when the stage is unknown or in V6-R5.
+    assert by_cond(high)["hail"].probability > scoring.NAME_THRESHOLD and by_cond(high)["hail"].status == "likely"
     assert scoring.status_for(0.05) == "open" and scoring.status_for(0.0499) == "ruled_out"
-    assert scoring.status_for(0.6) == "open" and scoring.status_for(0.6001) == "likely"
 
 
 def test_no_evidence_returns_priors():
@@ -128,7 +129,7 @@ def test_supports_and_refutes_are_opposite():
     sup = by_cond(scoring.score_hypotheses(C.ScoreRequest(investigation_id="i", crop="corn", evidence=[
         ev(1, "drought", "supports", "rain_deficit_30d")])))["drought"].probability
     ref = by_cond(scoring.score_hypotheses(C.ScoreRequest(investigation_id="i", crop="corn", evidence=[
-        ev(1, "drought", "refutes", "rain_deficit_30d")])))["drought"].probability
+        ev(1, "drought", "refutes", "rain_normal_30d")])))["drought"].probability
     prior = scoring.prior_probability("drought", "corn", None, None)
     assert ref < prior < sup
 
@@ -159,10 +160,13 @@ def test_stage_group():
     assert g("silking") == "flowering" and g("???") is None
 
 
-def test_stage_changes_prior():
-    early = scoring.prior_probability("planter_skip", "corn", "V2", None)
-    late = scoring.prior_probability("planter_skip", "corn", "R4", None)
-    assert early > late
+def test_stage_no_longer_nudges_the_prior_it_gates_the_name():
+    # memo 5.3: stage-dependent priors are hard windows, not small log-odds bonuses
+    for cid in ALL_CONDITIONS:
+        assert scoring.load_catalog().conditions[cid].stage_adjust == {}
+    assert scoring.prior_probability("planter_skip", "corn", "V2", None) == scoring.prior_probability("planter_skip", "corn", "R4", None)
+    assert scoring.window_check("planter_skip", "corn", scoring.stage_span("V2"))[0]
+    assert not scoring.window_check("planter_skip", "corn", scoring.stage_span("R4"))[0]
 
 
 # ---------- impact ----------

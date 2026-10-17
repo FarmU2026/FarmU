@@ -1,17 +1,15 @@
-"""Regenerate catalog/REVIEW.md, the agronomy weights review sheet, from the catalog JSON.
+"""Regenerate catalog/REVIEW.md, the agronomy review sheet, from the catalog JSON and the code that evaluates it.
 
     cd agent; python catalog/review_sheet.py          # writes catalog/REVIEW.md
     python catalog/review_sheet.py --check            # exit 1 if REVIEW.md is stale
 
-Read-only over the catalog and agents.py (parsed with `ast`, nothing imported but the scorer). No network.
-Do not edit REVIEW.md by hand: change the JSON or this script and rerun.
+Read-only over the catalog; it imports only the scorer and the evidence engine (no network, no AWS, no Strands).
+Do not edit REVIEW.md by hand: change the JSON or this script and rerun. A test fails when REVIEW.md is stale.
 """
 from __future__ import annotations
 
 import argparse
-import ast
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -19,133 +17,104 @@ AGENT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(AGENT))
 
 from fieldwatch import contracts as C  # noqa: E402
+from fieldwatch import evidence as E  # noqa: E402
 from fieldwatch import scoring  # noqa: E402
 
 CATALOG = AGENT / "catalog" / "conditions.json"
-AGENTS_PY = AGENT / "fieldwatch" / "agents.py"
 OUT = AGENT / "catalog" / "REVIEW.md"
 BIG = 2.5
-INCONSISTENT_RATIO = 2.0
-# Keys whose name says "absent / fine", so normally sent as `refutes` (a heuristic, label only).
-_NEG = re.compile(r"(^no_|_none$|_ok$|_normal_|not_|well_drained|_full$|no_lesions)")
 
 
-def _agents_literals(path: Path = AGENTS_PY) -> tuple[dict[str, list[str]], list[tuple]]:
-    """WEIGHT_KEYS and PATTERN_RULES from agents.py source, without importing strands."""
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    found: dict[str, object] = {}
-    for node in tree.body:
-        if isinstance(node, (ast.Assign, ast.AnnAssign)):
-            tgt = node.targets[0] if isinstance(node, ast.Assign) else node.target
-            if isinstance(tgt, ast.Name) and tgt.id in ("WEIGHT_KEYS", "PATTERN_RULES"):
-                found[tgt.id] = ast.literal_eval(node.value)
-    return found["WEIGHT_KEYS"], found["PATTERN_RULES"]  # type: ignore[return-value]
+def key_audit(catalog_weights: dict[str, set[str]], resolvers: set[str], llm: dict[str, set[str]]) -> dict:
+    """Cross-check the catalog against the evidence engine.
 
-
-def key_audit(catalog_weights: dict[str, set[str]], weight_keys: dict[str, list[str]], rules: list[tuple],
-              extra_code_keys: dict[str, set[str]] | None = None) -> dict:
-    """Cross-check the catalog against what agents can emit.
-
-    code: emitted deterministically (PATTERN_RULES, hail watch). llm: only offered to the specialists' prompt via
-    WEIGHT_KEYS. dead = in catalog but in neither. orphans = emittable but absent from the catalog (ignored by scorer).
+    dead = in the catalog, no resolver evaluates it. orphans = a resolver for a key no condition has.
+    photo_farmer = keys an LLM may supply (fixed fields); every other key is computed by `evidence.evaluate`.
     """
-    code: dict[str, set[str]] = {}
-    for _feat, _min, hyp, key, _why in rules:
-        code.setdefault(hyp, set()).add(key)
-    for h, ks in ({"hail": {"hail_swath_overlap_high"}} if extra_code_keys is None else extra_code_keys).items():
-        code.setdefault(h, set()).update(ks)
-    llm = {h: set(ks) for h, ks in weight_keys.items()}
-    dead, orphans, llm_only = [], [], []
-    for cid, ks in catalog_weights.items():
-        for k in sorted(ks):
-            if k not in code.get(cid, set()) and k not in llm.get(cid, set()):
-                dead.append((cid, k))
-            elif k not in code.get(cid, set()):
-                llm_only.append((cid, k))
-    for cid in sorted(set(llm) | set(code)):
-        for k in sorted(llm.get(cid, set()) | code.get(cid, set())):
-            if k not in catalog_weights.get(cid, set()):
-                orphans.append((cid, k))
-    return {"dead": dead, "orphans": orphans, "llm_only": llm_only, "code": code}
+    in_catalog = {k for ks in catalog_weights.values() for k in ks}
+    dead = [(c, k) for c, ks in sorted(catalog_weights.items()) for k in sorted(ks) if k not in resolvers]
+    orphans = sorted(resolvers - in_catalog)
+    photo_farmer = [(c, k) for c, ks in sorted(llm.items()) for k in sorted(ks)]
+    return {"dead": dead, "orphans": orphans, "photo_farmer": photo_farmer}
+
+
+def _pairs(pairs: list[tuple[str, str]]) -> str:
+    return ", ".join(f"`{c}.{k}`" for c, k in pairs) or "none"
+
+
+def _keys(keys: list[str]) -> str:
+    return ", ".join(f"`{k}`" for k in keys) or "none"
 
 
 # ---------- worked examples ----------
 
-_T = "2026-07-20T12:00:00Z"
+_REGION_FEATURES = dict(ring_score=0.0, wedge_score=0.0, edge_band_score=0.0, stripe_score=0.0, lowspot_overlap=0.2,
+                        sandy_soil_overlap=0.1, hail_swath_overlap=None)
 
 
-def _bundle(items: list[tuple[str, str, str]]) -> list[C.EvidenceItem]:
-    return [C.EvidenceItem(evidence_id=f"e{i:02d}", hypothesis=h, direction=d, weight_key=k,  # type: ignore[arg-type]
-                           source="example", value={}, reason=k.replace("_", " "), created_at=_T)
-            for i, (h, d, k) in enumerate(items, 1)]
+def _analysis(date: str = "2026-07-20", acres: float = 12.0, state: C.CropState | None = None, ndre_p90: float | None = None,
+              previous: str | None = None, delta: float | None = None, **features) -> C.FieldAnalysisResult:
+    region = C.AnomalyRegion(region_id="r1", geometry={"type": "Polygon", "coordinates": []}, area_acres=acres,
+                             centroid=(-96.54, 42.15), score=3.0, where="south-west part of the field",
+                             features=C.PatternFeatures(**{**_REGION_FEATURES, **features}))
+    ind = None
+    if ndre_p90 is not None:
+        stat = C.IndexStats(mean=0.4, p10=0.3, p50=0.4, p90=ndre_p90)
+        ind = C.Indices(ndvi=stat, ndre=stat, ndmi=stat)
+    return C.FieldAnalysisResult(
+        field=C.FieldRef(farm_id="f", field_id="x"), scene_id="s", date=date, status="ok", clear_fraction=0.95, indices=ind,
+        anomaly=C.AnomalySummary(field_score=3.0, delta_since_last=delta, regions=[region]),
+        comparison=C.OverlayComparison(scene_date=date, previous_date=previous) if previous else None, crop_state=state)
 
 
-EXAMPLES: list[dict] = [
-    {"name": "Pivot ring", "crop": "corn", "stage": "R2", "irrigated": True,
-     "items": [("pivot_failure", "supports", "ring_pattern_strong"), ("drought", "refutes", "rain_normal_30d"),
-               ("pivot_failure", "supports", "rain_normal_30d"), ("hail", "refutes", "no_hail_mesh"),
-               ("ponding", "refutes", "lowspot_overlap_none")]},
-    {"name": "Hail swath", "crop": "corn", "stage": "R2", "irrigated": True,
-     "items": [("hail", "supports", "hail_mesh_large"), ("hail", "supports", "hail_swath_overlap_high"),
-               ("hail", "supports", "sudden_drop_after_storm"), ("drought", "refutes", "rain_normal_30d"),
-               ("pivot_failure", "refutes", "ring_pattern_weak")]},
-    {"name": "Ponding in low spot", "crop": "soybeans", "stage": "V4", "irrigated": False,
-     "items": [("ponding", "supports", "lowspot_overlap_high"), ("ponding", "supports", "heavy_rain_7d"),
-               ("ponding", "supports", "soil_poorly_drained"), ("hail", "refutes", "no_hail_mesh"),
-               ("drought", "refutes", "rain_normal_30d")]},
-    {"name": "Uniform drought", "crop": "corn", "stage": "R2", "irrigated": False,
-     "items": [("drought", "supports", "stress_uniform_field"), ("drought", "supports", "rain_deficit_30d"),
-               ("drought", "supports", "drought_monitor_d1_plus"), ("drought", "supports", "heat_days_over_35c"),
-               ("hail", "refutes", "no_hail_mesh"), ("ponding", "refutes", "lowspot_overlap_none")]},
-    {"name": "Healthy field", "crop": "corn", "stage": "V8", "irrigated": True,
-     "items": [("unknown", "supports", "no_pattern_found"), ("drought", "refutes", "drought_monitor_none"),
-               ("drought", "refutes", "rain_normal_30d"), ("hail", "refutes", "no_hail_mesh"),
-               ("ponding", "refutes", "lowspot_overlap_none"),
-               ("disease_pest", "refutes", "no_disease_reports_county")]},
-]
+def _vegetative(label: str) -> C.CropState:
+    return C.CropState(state="vegetative", stage_label=label, diagnosable=True)
 
 
-def _request(ex: dict) -> C.ScoreRequest:
-    return C.ScoreRequest(investigation_id="review", crop=ex["crop"], stage=ex["stage"], irrigated=ex["irrigated"],
-                          evidence=_bundle(ex["items"]))
+def _inputs(crop="corn", stage="V8", irrigated=False, rain=(3.0, 3.0), prev=None, **kw) -> E.FieldInputs:
+    ctx = C.FieldContext(field_id="x", built_at="2026-07-01T00:00:00Z", crop_history={"2025": prev} if prev else {})
+    wx = {"rain_in": rain[0], "normal_rain_in": rain[1]}
+    analysis = kw.pop("analysis", None) or _analysis(state=_vegetative(stage))
+    return E.FieldInputs(field_id="x", field_name="the east 80", crop=crop, irrigated=irrigated, acres=80.0,
+                         analysis=analysis, context=ctx, weather=wx, stage=stage, **kw)
 
 
-def _run(ex: dict) -> list[tuple[str, float, str]]:
-    return [(h.condition, h.probability, h.status) for h in scoring.score_hypotheses(_request(ex)).hypotheses]
+def examples() -> list[tuple[str, str, E.FieldInputs]]:
+    return [
+        ("Observed failure: wet month, soybeans last year, nothing seen in the field",
+         "Old catalog: nitrogen 69%, 'likely', from rain (+1.2) and soybean rotation (+0.8, counted the wrong way).",
+         _inputs(rain=(6.0, 3.0), prev="soybeans")),
+        ("Pivot ring on an irrigated field", "",
+         _inputs(stage="R2 (blister)", irrigated=True, analysis=_analysis(state=_vegetative("R2"), ring_score=0.82),
+                 hail_watches=[])),
+        ("Hail swath with a sudden drop", "",
+         _inputs(stage="V10", analysis=_analysis(state=_vegetative("V10"), hail_swath_overlap=0.8, previous="2026-07-10",
+                                                 delta=-0.14),
+                 hail=C.HailReport(field_id="x", start="2026-07-01", end="2026-07-20", max_hail_mm=40.0,
+                                   pct_area_over_threshold=60, peak_date="2026-07-14"))),
+        ("Red-edge low at V10, farmer silent", "Nitrogen may be named at most as 'possible', never 'likely'.",
+         _inputs(stage="V10", region_ndre=0.34, analysis=_analysis(state=_vegetative("V10"), ndre_p90=0.42))),
+        ("Red-edge low at V10 and the farmer says nitrogen went on short", "The farmer's report lifts the cap.",
+         _inputs(stage="V10", region_ndre=0.34, farmer=E.FarmerInputs(n_applied="short"),
+                 analysis=_analysis(state=_vegetative("V10"), ndre_p90=0.42))),
+        ("Irregular patches, no photo", "Disease or insects is at most 'possible' (scout for it).",
+         _inputs(stage="R2 (blister)", analysis=_analysis(state=_vegetative("R2")))),
+        ("Whole field stressed in a dry month (dryland, R2)", "",
+         _inputs(stage="R2 (blister)", rain=(1.0, 3.0), analysis=_analysis(state=_vegetative("R2"), acres=70.0))),
+        ("Weak area in the low ground after heavy rain", "",
+         _inputs(stage="V4", rain=(6.0, 3.0), analysis=_analysis(state=_vegetative("V4"), lowspot_overlap=0.8))),
+    ]
 
 
-def _how_sure(p: float) -> str:
-    return "pretty sure" if p >= 0.8 else "fairly sure" if p >= 0.55 else "not sure, need a photo"
-
-
-def run_examples() -> list[dict]:
-    """Score each bundle, then again with the top condition's largest applied weight halved (catalog restored)."""
-    out = []
-    for ex in EXAMPLES:
-        base = _run(ex)
-        detail = scoring.explain(_request(ex))
-        top = next((c for c, _p, _s in base if detail[c]["applied"]), base[0][0])  # highest-ranked with evidence
-        applied = detail[top]["applied"]
-        row = {"ex": ex, "base": base, "halved_key": None, "halved": None}
-        if applied:
-            key = applied[0]["weight_key"]
-            w = scoring.load_catalog().conditions[top].weights[key]
-            old = w.weight
-            try:
-                w.weight = old / 2
-                row["halved"] = _run(ex)
-            finally:
-                w.weight = old
-            row["halved_key"] = (top, key, old)
-        out.append(row)
-    return out
+def example_rows() -> list[dict]:
+    rows = []
+    for name, note, inputs in examples():
+        vec, det = E.determine(inputs)
+        rows.append({"name": name, "note": note, "vec": vec, "det": det, "inputs": inputs})
+    return rows
 
 
 # ---------- markdown ----------
-
-
-def _fmt_list(pairs) -> str:
-    return ", ".join(f"`{c}.{k}`" for c, k in pairs) or "none"
 
 
 def _dollars(x: float) -> str:
@@ -153,7 +122,7 @@ def _dollars(x: float) -> str:
 
 
 def loss_section(lt: scoring.LossTables) -> list[str]:
-    lines = ["## 3. Loss table sanity ($/acre at default yield and price)", "",
+    lines = ["## 5. Loss table sanity ($/acre at default yield and price)", "",
              "Per condition x crop: lowest low-severity to highest high-severity dollar loss across stage groups, "
              f"for {lt.reference_days} days of problem (duration-sensitive conditions scale x{lt.days_scaling.min}"
              f" to x{lt.days_scaling.max}: {', '.join(lt.days_scaling.conditions)}). Medium = range of the medium "
@@ -185,127 +154,137 @@ def loss_section(lt: scoring.LossTables) -> list[str]:
     return lines
 
 
+def _who(w: dict) -> str:
+    return {"photo": "photo (LLM, fixed field)", "farmer": "farmer (LLM, fixed field)"}.get(w["source"], "code")
+
+
+def _constants() -> list[str]:
+    rows = [
+        ("REGIONAL_CAP", scoring.REGIONAL_CAP, "[design] most log-odds regional evidence (weather, county reports) may add or take away per condition, in total (about 2x odds)"),
+        ("STATIC_CAP", scoring.STATIC_CAP, "[design] same for static context (soil, terrain, flood zone, crop history) (about 4.5x odds)"),
+        ("FIELD_CAP", scoring.FIELD_CAP, "memo 5.2: clamp on this field's own evidence per condition"),
+        ("NAME_THRESHOLD", scoring.NAME_THRESHOLD, "[design] probability a condition needs to be named"),
+        ("NAME_MARGIN", scoring.NAME_MARGIN, "[design] lead over the runner-up it needs"),
+        ("POSSIBLE_MIN", scoring.POSSIBLE_MIN, "[design] probability a candidate needs to be listed as 'possible'"),
+        ("RULED_OUT_BELOW", scoring.RULED_OUT_BELOW, "probability under which a condition is shown as ruled out"),
+        ("LOGIT_CLAMP", scoring.LOGIT_CLAMP, "final log-odds clamp"),
+        ("SUDDEN_DROP", E.SUDDEN_DROP, "memo 3.5 [design]: median crop-health change between passes that counts as abrupt"),
+        ("SI_STRONG / SI_BORDERLINE", f"{E.SI_STRONG} / {E.SI_BORDERLINE}", "memo 3.2: sufficiency index cuts (0.95 from Varvel 1997; unverified for satellite pixels)"),
+        ("RING / WEDGE / EDGE / STRIPE strong", f"{E.RING_STRONG}", "[design] analyzer pattern score at or above this counts as the shape"),
+        ("RAIN deficit / normal / excess", f"{E.RAIN_DEFICIT_BELOW} / {E.RAIN_NORMAL_RANGE[0]}-{E.RAIN_NORMAL_RANGE[1]} / {E.RAIN_EXCESS_AT}", "[design] 30-day rain over normal"),
+        ("HEAVY_RAIN_7D_MM", E.HEAVY_RAIN_7D_MM, "catalog: about 50 mm in a week"),
+        ("HAIL_LARGE_MM / HAIL_MODERATE_MM", f"{E.HAIL_LARGE_MM} / {E.HAIL_MODERATE_MM}", "catalog: 25 mm and 12 mm"),
+        ("UNIFORM_SHARE", E.UNIFORM_SHARE, "[design] problem area covers this share of the field = field-wide stress"),
+        ("LOW_AWC_CM", E.LOW_AWC_CM, "[design] area-weighted available water capacity under this = sandy / droughty"),
+    ]
+    return ["| constant | value | meaning |", "|---|---|---|", *[f"| `{n}` | {v} | {t} |" for n, v, t in rows]]
+
+
 def build() -> str:
     raw = json.loads(CATALOG.read_text(encoding="utf-8"))
-    cat = scoring.load_catalog()
-    wk, rules = _agents_literals()
     weights = {cid: set(c["weights"]) for cid, c in raw["conditions"].items()}
-    audit = key_audit(weights, wk, rules)
-    code_keys = {(c, k) for c, ks in audit["code"].items() for k in ks}
+    audit = key_audit(weights, set(E.RESOLVERS), scoring.llm_keys())
+    total_keys = len({k for ks in weights.values() for k in ks})
+    total_pairs = sum(len(v) for v in weights.values())
 
-    by_key: dict[str, dict[str, float]] = {}
+    L = [f"# Review sheet for the agronomist (catalog {raw['version']})", "",
+         "Generated by `agent/catalog/review_sheet.py` from `conditions.json`, `loss_tables.json`, the scorer and the "
+         "evidence engine. Do not edit by hand; rerun the script. Every number is a DRAFT. Source of the design: "
+         "`docs/research/grounding.md`. Weight = log-likelihood ratio: +w on `supports`, -w on `refutes` "
+         "(1.0 = odds x2.7, 2.0 = x7.4, 3.0 = x20).", "",
+         "## 0. How FieldWatch decides, in five steps", "",
+         "1. **Code evaluates every evidence key, every run** (`fieldwatch/evidence.py`): `present`, `absent` or "
+         "`not_evaluable` (the data is missing). No language model chooses a key. A model may only read a photo or "
+         "the farmer's words into the fixed photo and farmer keys below.",
+         "2. **Each key has a class.** `field` = from this field's own pixels, geometry, event overlap, or an observation "
+         "of this field (photo, farmer). `static` = local context that does not change with the season (soil, terrain, "
+         "flood zone, crop history). `regional` = weather, drought category, county disease reports.",
+         f"3. **Caps.** Regional evidence in total moves a condition by at most +-{scoring.REGIONAL_CAP:g} log-odds, static "
+         f"+-{scoring.STATIC_CAP:g}, field +-{scoring.FIELD_CAP:g}. Items in a correlated **cluster** (rain, low ground, "
+         "drainage, flood zone ...) count once: the strongest, per direction.",
+         f"4. **Naming rule.** A condition is named only if it is inside its **stage window**, nothing **rules it out**, "
+         f"at least one **required field-evidence** key is present, and its probability is at least "
+         f"{scoring.NAME_THRESHOLD:.0%} and {scoring.NAME_MARGIN:.0%} ahead of the runner-up. Some conditions are capped at "
+         "'possible' until the farmer or a photo confirms.",
+         "5. **Otherwise: not determined.** The farmer is told what was ruled out, what is possible, and is offered a "
+         "scouting pin. FieldWatch never guesses a cause. Farmer text uses the tiers likely / possible / not determined, "
+         "never percentages (the probabilities are not calibrated yet).", "",
+         f"The catalog has {total_pairs} (condition, key) pairs over {total_keys} distinct keys; "
+         f"{len(audit['photo_farmer'])} are photo or farmer inputs (read by a model into fixed fields), the rest are "
+         f"computed in code. Dead keys (in the catalog, no resolver): {_pairs(audit['dead'])}. "
+         f"Orphan resolvers: {_keys(audit['orphans'])}.", "",
+         "## 1. Design values to ratify (all `[design]` unless a source is named)", ""]
+    L += _constants()
+    L += ["", "### What changed from catalog 2026-10-10.2", "",
+          "- Evidence keys now carry `direction`, `evidence_class`, optional `cluster`, and `how` (how code decides). The "
+          "scorer ignores an evidence item whose direction contradicts the catalog.",
+          "- **Removed bonuses (priors kept):** nitrogen corn +0.5 and its stage terms (+0.3, +0.3, -1.0): no source, and "
+          "they alone made nitrogen 'likely' on rain (memo 5.2). All other `stage_adjust` terms are replaced by the hard stage "
+          "windows (memo 5.3). Crop and irrigation terms stay.",
+          "- **Removed keys:** `nitrogen.pattern_uniform_pale` (uniform paleness is not nitrogen-specific, memo 3.2), "
+          "`nitrogen.ndre_low_ndvi_normal` (replaced by the sufficiency-index keys `n_red_edge_si_low` and "
+          "`n_red_edge_si_borderline`), `unknown.no_pattern_found` and `unknown.clear_pattern_found` (not-determined is now "
+          "an outcome, not a competing hypothesis).",
+          "- **Direction corrections:** `pivot_failure.stress_uniform_field` now *refutes* (the old code counted it as support "
+          "while the reason said the opposite); `nitrogen.prior_crop_soybeans` now *refutes* (rotation credit lowers the "
+          "need; the old run counted it as support).",
+          "- **New required evidence per condition**, stage windows, rule-outs, tier caps and scouting checklists (below).", ""]
+
+    L += ["## 2. Conditions", ""]
     for cid, c in raw["conditions"].items():
-        for k, w in c["weights"].items():
-            by_key.setdefault(k, {})[cid] = w["weight"]
-    reused = {k: v for k, v in by_key.items() if len(v) > 1}
-    inconsistent = {k: v for k, v in reused.items() if max(v.values()) / min(v.values()) >= INCONSISTENT_RATIO}
-    big = [(cid, k, w["weight"]) for cid, c in raw["conditions"].items() for k, w in c["weights"].items()
-           if w["weight"] > BIG]
-    total_keys = sum(len(v) for v in weights.values())
-
-    L = [f"# Weights review sheet (catalog {raw['version']})", "",
-         "Generated by `agent/catalog/review_sheet.py` from `conditions.json`, `loss_tables.json` and `agents.py`. "
-         "Do not edit by hand; rerun the script. Every number is a DRAFT. Weight = log-likelihood ratio: "
-         "+w on `supports`, -w on `refutes`; 1.0 = odds x2.7, 2.0 = x7.4, 3.0 = x20. "
-         f"Status cutoffs: ruled_out < {scoring.RULED_OUT_BELOW:.0%}, likely > {scoring.LIKELY_ABOVE:.0%}; "
-         "how_sure wording: >= 80% pretty sure, >= 55% fairly sure, else not sure. A repeat of the same "
-         "(condition, key, direction) counts once. Final log-odds clamp at +-8.", "",
-         "Column key: **dir** = usual direction by key name (heuristic): `+` supports, `-` refutes. "
-         "**emit** = `code` if a PATTERN_RULE or the hail watch sends it deterministically, `llm` if it is only "
-         "offered to the specialists' prompt. **flags**: `BIG` weight > 2.5, `DUP` key reused in another condition, "
-         "`INC` reused with weights 2x or more apart, `DEAD` no agent can emit it. **?** = reviewer verdict.", "",
-         "## 0. Discuss first", ""]
-
-    sums = {}
-    for crop, irr in (("corn", True), ("corn", False), ("soybeans", True), ("soybeans", False)):
-        sums[(crop, irr)] = sum(scoring.prior_probability(cid, crop, "R2", irr) for cid, c in cat.conditions.items()
-                                if not (c.requires_irrigated and irr is False))
-    prior_sum = sum(c["prior"] for c in raw["conditions"].values())
-    L += [f"- **Priors.** Raw priors sum to {prior_sum:.2f} (conditions are not exclusive, so about 1 is fine). "
-          "After crop/stage/irrigation adjust at R2 they sum to (above 1 means a field starts with more than 100% of blame "
-          "spread across causes; a healthy field then shows several 'open' conditions at 20%+): "
-          + ", ".join(f"{c} {'irrigated' if i else 'dryland'} {s:.2f}" for (c, i), s in sums.items())
-          + ". Pivot gets -6.0 log-odds when dryland (effectively off).",
-          f"- **Dead keys** (in catalog, no agent can emit): {_fmt_list(audit['dead'])}.",
-          f"- **Orphan keys** (agents can emit, not in catalog, so silently ignored): {_fmt_list(audit['orphans'])}.",
-          f"- **LLM-only keys**: {len(audit['llm_only'])} of {total_keys} keys rely on a specialist choosing to "
-          "emit them (no deterministic code path); only "
-          + ", ".join(f"`{c}.{k}`" for c, k in sorted(code_keys)) + " are emitted by code.",
-          f"- **Weights above {BIG}** ({len(big)}): "
-          + ", ".join(f"`{c}.{k}` {w:g}" for c, k, w in sorted(big, key=lambda t: -t[2])) + ".",
-          f"- **Reused keys with inconsistent strength** ({len(inconsistent)}): "
-          + "; ".join(f"`{k}` " + ", ".join(f"{c} {w:g}" for c, w in sorted(v.items(), key=lambda t: -t[1]))
-                      for k, v in inconsistent.items()) + ".",
-          "- **Semantic oddities.** `drought.pattern_localized` is a *supports* weight for drought, but a localized "
-          "pattern usually argues against uniform drought. `pivot_failure.rain_normal_30d` supports pivot failure "
-          "(0.4) while the same key refutes drought (2.0): confirm intent. `nitrogen.rain_excess_30d` and "
-          "`ponding.rain_excess_30d` fire on the same fact, so both rise. `sandy_soil_overlap_high` feeds both "
-          "sandy_soil_water_stress (3.0) and nitrogen (0.8).",
-          "- **Near-conclusive rule-outs.** `no_hail_mesh` refutes hail at 3.0 and `soil_not_sandy` 2.5: one refute at "
-          "3.0 takes a 10% prior to about 0.5%, i.e. ruled_out. Confirm each is meant to be conclusive.",
-          "", "### Pending: flood zone / stream / wetland", "",
-          "Three draft weights are expected in another person's PR. After `git fetch`, they are not on any remote "
-          "branch or in main as of this generation, so these rows are placeholders.", "",
-          "| proposed key | condition | weight | dir | reason / source | ? |", "|---|---|---|---|---|---|",
-          "| `flood_zone_...` (name TBD) | ponding? | TBD | + | TBD | |",
-          "| `stream_...` (name TBD) | ponding? | TBD | + | TBD | |",
-          "| `wetland_...` (name TBD) | ponding? | TBD | + | TBD | |",
-          "", "Questions: which condition do they feed (ponding only, or also nitrogen loss or disease)? Do they "
-          "double count with `lowspot_overlap_high` (3.0) and `soil_poorly_drained` (1.5)? Emitted by code (add a "
-          "PATTERN_RULE and a WEIGHT_KEYS entry) or by a specialist?", ""]
-
-    L += ["## 1. Conditions", ""]
-    for cid, c in raw["conditions"].items():
+        if cid == "unknown":
+            L += [f"### {cid} ({c['label']})", "", c["prior_reason"], ""]
+            continue
         adj = []
-        if c["crop_adjust"]:
+        if c["crop_adjust"] and any(c["crop_adjust"].values()):
             adj.append("crop " + ", ".join(f"{k} {v:+g}" for k, v in c["crop_adjust"].items() if v))
         if c["irrigated_adjust"]:
             adj.append("irrigated " + ", ".join(f"{k} {v:+g}" for k, v in c["irrigated_adjust"].items()))
-        if c["stage_adjust"]:
-            adj.append("stage " + ", ".join(f"{k} {v:+g}" for k, v in c["stage_adjust"].items()))
+        win = "; ".join(f"{crop} {lo} to {hi}" for crop, (lo, hi) in c["stage_windows"].items())
+        cap = c.get("tier_cap")
         L += [f"### {cid} ({c['label']}): prior {c['prior']:.0%}", "",
-              f"Prior reason: {c['prior_reason']}  ",
-              ("Adjust (log-odds): " + "; ".join(adj)) if adj else "No adjustments.",
-              "Requires an irrigated field." if c["requires_irrigated"] else "", "",
-              "| weight_key | w | dir | emit | flags | reason | source | ? |", "|---|---|---|---|---|---|---|---|"]
-        for k, w in sorted(c["weights"].items(), key=lambda t: -t[1]["weight"]):
-            flags = []
-            if w["weight"] > BIG:
-                flags.append("BIG")
-            if k in reused:
-                flags.append("DUP")
-            if k in inconsistent:
-                flags.append("INC")
-            if (cid, k) in audit["dead"]:
-                flags.append("DEAD")
-            emit = "code" if (cid, k) in code_keys else "llm"
-            d = "-" if _NEG.search(k) else "+"
-            L.append(f"| `{k}` | {w['weight']:g} | {d} | {emit} | {' '.join(flags)} | {w['reason']} | "
-                     f"{w['source']} | |")
+              f"- Prior reason: {c['prior_reason']}",
+              ("- Adjust (log-odds): " + "; ".join(adj)) if adj else "- No adjustments.",
+              *(["- Requires an irrigated field."] if c["requires_irrigated"] else []),
+              f"- **Stage window (hard gate):** {win or 'none'}" + (" (stage must be known)" if c.get("needs_known_stage") else ""),
+              f"- **Required field evidence (one of):** {_keys(c['required_field_evidence'])}",
+              f"- **Rules it out:** {_keys(c['rules_out'])}",
+              *([f"- **Capped at '{cap['max_tier']}'** unless one of {_keys(cap['lifted_by_any'])}. {cap['why']}"] if cap else []),
+              f"- **Scouting checklist:** {c['scout_for']}", "",
+              "| weight_key | w | dir | class | cluster | computed by | how | reason | source | ? |",
+              "|---|---|---|---|---|---|---|---|---|---|"]
+        for k, w in sorted(c["weights"].items(), key=lambda t: (t[1]["evidence_class"], -t[1]["weight"], t[0])):
+            flag = " **BIG**" if w["weight"] > BIG else ""
+            L.append(f"| `{k}` | {w['weight']:g}{flag} | {'+' if w['direction'] == 'supports' else '-'} | {w['evidence_class']} | "
+                     f"{w.get('cluster') or ''} | {_who(w)} | {w['how']} | {w['reason']} | {w['source']} | |")
         L.append("")
 
-    L += ["## 2. Worked examples", "",
-          "Evidence bundles run through `score_hypotheses`: probability and status per condition, then the same "
-          "bundle with the top condition's largest applied weight halved. `+` = supports, `-` = refutes.", ""]
-    for r in run_examples():
-        ex = r["ex"]
-        L += [f"### {ex['name']} ({ex['crop']}, {ex['stage']}, {'irrigated' if ex['irrigated'] else 'dryland'})", "",
-              "Evidence: " + "; ".join(f"{'+' if d == 'supports' else '-'}{h}.{k}" for h, d, k in ex["items"]), ""]
-        halved = {c: (p, s) for c, p, s in r["halved"]} if r["halved"] else {}
-        L += ["| condition | prob | status | prob if halved | status if halved |", "|---|---|---|---|---|"]
-        for c, p, s in r["base"][:5]:
-            hp, hs = halved.get(c, (None, None))
-            L.append(f"| {c} | {p:.0%} | {s} | " + (f"{hp:.0%} | {hs} |" if hp is not None else "- | - |"))
-        if r["halved_key"]:
-            c, k, old = r["halved_key"]
-            hb = r["halved"][0]
-            before = {x[0]: x[1] for x in r["base"]}[c]
-            after = halved[c][0]
-            L += ["", f"Halved `{c}.{k}` {old:g} to {old / 2:g}: {c} {before:.0%} to {after:.0%}; how_sure of the "
-                      f"overall top `{_how_sure(r['base'][0][1])}` to `{_how_sure(hb[1])}`; top becomes {hb[0]} at "
-                      f"{hb[1]:.0%}.", ""]
-        else:
-            L.append("")
+    L += ["## 3. Worked examples", "",
+          "Each runs the evidence engine on hand-built inputs, then the scorer. Counts are over the "
+          f"{total_pairs} (condition, key) pairs. Probabilities are internal; farmers see only the tier.", ""]
+    for r in example_rows():
+        det, vec = r["det"], r["vec"]
+        L += [f"### {r['name']}", ""]
+        if r["note"]:
+            L += [r["note"], ""]
+        counts = vec.by_state()
+        top = ", ".join(f"{c.condition} ({c.tier}, {c.probability:.0%})" for c in det.candidates) or "none"
+        L += [f"- Outcome: **{det.outcome}**" + (f", named: `{det.condition}`" if det.condition else ""),
+              f"- Candidates: {top}",
+              f"- Evidence: {counts['present']} present, {counts['absent']} absent, {counts['not_evaluable']} not evaluable.",
+              "- Present: " + (", ".join(f"{'+' if x.direction == 'supports' else '-'}{x.condition}.{x.key}" for x in vec.present()) or "none"),
+              ""]
+    L += ["## 4. Questions for the agronomist", "",
+          "1. Ratify or replace the stage windows above (memo 3.2 to 3.9 give the sources; soybean windows are the least sourced).",
+          "2. Nitrogen: V6-V12 only, 'possible' until the farmer says N was short or gives application records. Is SI < 0.90 "
+          "(strong) and < 0.95 (borderline) the right cut for a red-edge index of the stressed area against the field's own top "
+          "10%? What N history or soil-test evidence should lift the cap besides a farmer report?",
+          "3. Ponding is named from low-ground overlap alone; the memo wants a heavy-rain event as a necessary gate. Add one?",
+          "4. Planter skips need a photo, a farmer report or a stripe-width match to reach the naming bar (stripe alone is 64%). Confirm.",
+          "5. Drought is named from field-wide stress; the memo asks for an NDMI trend structured by soil water capacity "
+          "(needs a second pass; not computed yet).",
+          "6. Priors are the old hand-set values; replace with RMA cause-of-loss base rates when pulled (memo 5.3).",
+          "7. Hail loss rows (below) are still DRAFT until the FCIC handbook exhibits are loaded (memo section 7, item 5).", ""]
     L += loss_section(scoring.load_loss_tables())
     return "\n".join(L).rstrip() + "\n"
 

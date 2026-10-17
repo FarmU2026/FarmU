@@ -1,4 +1,7 @@
-"""WS5 part B: supervisor + specialists reasoning. Scripted model, no network, no Bedrock."""
+"""WS5 part B: supervisor + specialists reasoning. Scripted model, no network, no Bedrock.
+
+The evidence is computed by code (fieldwatch/evidence.py) and scored by the real scorer: nothing here fakes a
+probability. The scripted model only plays the tool sequence of each role, then emits that role's structured output."""
 import dataclasses
 import json
 import re
@@ -10,7 +13,8 @@ from strands.models.model import Model
 import fieldwatch.agents as agents
 from fieldwatch import config
 from fieldwatch import contracts as C
-from fieldwatch import registry
+from fieldwatch import evidence as E
+from fieldwatch import registry, scoring
 from fieldwatch.hooks import ToolTimeline
 from fieldwatch.schemas import Diagnosis, how_sure_phrase, scrub_percentages
 
@@ -45,15 +49,16 @@ def ev(eid, hyp, direction, key, source, value, reason):
             "value": value, "reason": reason, "created_at": "2000-01-01T00:00:00Z"}
 
 
+# What the specialists say. Only the photo item is theirs to give; the ring and the hail refute are facts the code
+# owns, and the ledger drops them.
 RESPONSES = {
     "imagery": {"agent": "imagery", "notes": "Ring on the outer edge.", "tool_calls": 99, "evidence": [
         ev("x", "pivot_failure", "supports", "ring_pattern_strong", "get_scene_analysis", {"ring_score": 0.82},
            "The weak area is a ring on the outer edge.")]},
     "environment": {"agent": "environment", "notes": "Rain normal.", "tool_calls": 0, "evidence": [
-        ev("x", "drought", "refutes", "rain_normal_30d", "get_weather", {"rain_in": 3.1}, "Rain was normal."),
         ev("x", "hail", "refutes", "no_hail_mesh", "get_weather", {"hail_reported": False}, "No hail.")]},
     "agronomy": {"agent": "agronomy", "notes": "No disease reports.", "tool_calls": 0, "evidence": [
-        ev("x", "disease_pest", "refutes", "no_disease_reports_county", "get_disease_reports", {}, "No disease nearby.")]},
+        ev("x", "disease_pest", "refutes", "photo_no_lesions", "photo", {"photo": "clean leaves"}, "The leaves in the photo are clean.")]},
 }
 SPECIALIST_TOOL_STEP = {"imagery": ("get_scene_analysis", {"field_id": "north-pivot"}),
                         "environment": ("get_weather", {"field_id": "north-pivot"}), "agronomy": None}
@@ -112,7 +117,7 @@ FULL_RUN = [
     ("ask_imagery", {"question": "What does the pattern look like?", "field_id": "north-pivot"}),
     ("ask_environment", {"question": "Does weather explain it?", "field_id": "north-pivot"}),
     ("ask_agronomy", {"question": "Any disease reports?", "field_id": "north-pivot"}),
-    ("score_hypotheses", {"crop": "corn", "stage": "R2 (blister)", "irrigated": True}),
+    ("score_hypotheses", {}),
     ("estimate_impact", {"field_id": "north-pivot", "condition": "pivot_failure", "affected_acres": 12.1}),
 ]
 FAST_RUN = [
@@ -122,34 +127,23 @@ FAST_RUN = [
 ]
 
 
-def _score(top: float):
-    return C.ScoreResult(
-        hypotheses=[C.Hypothesis(condition="pivot_failure", probability=top, status="likely" if top > 0.6 else "open"),
-                    C.Hypothesis(condition="drought", probability=0.03, status="ruled_out"),
-                    C.Hypothesis(condition="hail", probability=0.02, status="ruled_out")],
-        catalog_version="test")
-
-
 @pytest.fixture
 def harness(monkeypatch):
-    """Scripted model + recording scorer/impact in the registry. Returns a runner."""
-    calls = {"score": [], "impact": [], "roles": []}
+    """Scripted model; the registry's impact tool is recorded, the scorer is the real one. Returns a runner."""
+    calls = {"impact": [], "roles": []}
 
-    def run(steps, top=0.86, context=None):
+    def run(steps, context=None):
         monkeypatch.setattr(agents, "model", lambda: ScriptedModel(steps, calls["roles"]))
-
-        def scorer(**req):
-            calls["score"].append(C.ScoreRequest.model_validate(req))
-            return _score(top)
 
         def impact(**req):
             calls["impact_extra"] = {k: req.pop(k) for k in ("crop", "expected_yield", "price") if k in req}
             calls["impact"].append(C.ImpactRequest.model_validate(req))
             return C.ImpactEstimate.model_validate_json((FIXTURES / "impact_estimate.json").read_text())
 
-        for name, fn in (("score_hypotheses", scorer), ("estimate_impact", impact)):
-            monkeypatch.setitem(registry.BY_NAME, name, dataclasses.replace(registry.BY_NAME[name], fn=fn))
+        monkeypatch.setitem(registry.BY_NAME, "estimate_impact",
+                            dataclasses.replace(registry.BY_NAME["estimate_impact"], fn=impact))
         sup = agents.build_supervisor(ToolTimeline(lambda e: None), context=context)
+        run.agent = sup
         return sup("Investigate the field called 'north pivot'.", structured_output_model=Diagnosis)
 
     run.calls = calls
@@ -158,7 +152,19 @@ def harness(monkeypatch):
 
 def _ring_context():
     analysis = json.loads((FIXTURES / "field_analysis_result.json").read_text())
-    return {"analysis": analysis, "crop": "corn", "stage": "R2 (blister)", "irrigated": True}
+    return {"analysis": analysis, "crop": "corn", "stage": "R2 (blister)", "irrigated": True,
+            "open_watches": [], "weather": {"rain_in": 3.1, "normal_rain_in": 3.0}, "field_acres": 130}
+
+
+def _weak_context():
+    """A faint ring: something is there, but not enough to name."""
+    ctx = _ring_context()
+    ctx["analysis"]["anomaly"]["regions"][0]["features"].update(ring_score=0.4)
+    return ctx
+
+
+def _score_payloads(agent):
+    return agents._tool_payloads(agent.messages, "score_hypotheses")
 
 
 # ---------- specialists ----------
@@ -171,20 +177,24 @@ def test_specialist_tool_lists_are_read_only_and_known():
             assert (spec and spec.access == "read") or t == "get_scene_analysis", (name, t)
 
 
-def test_specialist_returns_valid_specialist_response(monkeypatch):
+def test_specialists_may_only_add_photo_and_farmer_evidence(monkeypatch):
     log = []
     monkeypatch.setattr(agents, "model", lambda: ScriptedModel([], log))
     ledger = agents.EvidenceLedger()
     ask_imagery, ask_environment, ask_agronomy = agents.build_specialists(ToolTimeline(lambda e: None), ledger)
     out = {}
     for t, who in ((ask_imagery, "imagery"), (ask_environment, "environment"), (ask_agronomy, "agronomy")):
-        out[who] = C.SpecialistResponse.model_validate_json(t(question="Look at it.", field_id="north-pivot"))
-        assert out[who].agent == who
-    assert out["imagery"].tool_calls == 1 and out["agronomy"].tool_calls == 0  # real counts, not the model's
-    ids = [e.evidence_id for r in out.values() for e in r.evidence]
-    assert len(ids) == 4 and len(set(ids)) == 4
-    assert all(e.created_at != "2000-01-01T00:00:00Z" for r in out.values() for e in r.evidence)
-    assert len(ledger.evidence) == 4 and ledger.called == ["imagery", "environment", "agronomy"]
+        out[who] = json.loads(t(question="Look at it.", field_id="north-pivot"))
+        assert out[who]["agent"] == who
+    assert out["imagery"]["tool_calls"] == 1 and out["agronomy"]["tool_calls"] == 0  # real counts, not the model's
+    # the ring and the hail refute are code's facts: dropped. The photo finding is kept, as a fixed field.
+    assert out["imagery"]["evidence"] == [] and out["imagery"]["dropped"] == 1
+    assert out["environment"]["evidence"] == [] and out["environment"]["dropped"] == 1
+    assert [e.weight_key for e in ledger.evidence] == ["photo_no_lesions"]
+    kept = ledger.evidence[0]
+    assert kept.source == "photo" and kept.created_at != "2000-01-01T00:00:00Z" and kept.evidence_id.startswith("agr-")
+    assert sorted(ledger.rejected) == ["hail.no_hail_mesh", "pivot_failure.ring_pattern_strong"]
+    assert ledger.called == ["imagery", "environment", "agronomy"]
 
 
 def test_registry_wrapper_exposes_stub_tools_with_their_schema():
@@ -195,39 +205,54 @@ def test_registry_wrapper_exposes_stub_tools_with_their_schema():
     assert C.HailReport.model_validate(out)
 
 
+def _item(i, hyp, direction, key):
+    return C.EvidenceItem(**ev(f"a{i}", hyp, direction, key, "photo", {}, "r"))
+
+
 def test_ledger_does_not_double_count_the_same_fact():
     ledger = agents.EvidenceLedger()
-    item = C.EvidenceItem(**ev("a", "hail", "refutes", "no_hail_mesh", "get_hail", {}, "No hail."))
+    item = _item(1, "disease_pest", "supports", "photo_tar_spot_lesions")
     assert len(ledger.add([item, item.model_copy(update={"evidence_id": "b"})])) == 1
+
+
+def test_ledger_rejects_code_keys_and_flipped_directions():
+    ledger = agents.EvidenceLedger()
+    added = ledger.add([_item(1, "hail", "refutes", "no_hail_mesh"),  # code computes hail
+                        _item(2, "disease_pest", "refutes", "photo_tar_spot_lesions"),  # the catalog says supports
+                        _item(3, "nitrogen", "supports", "farmer_reports_n_short")])
+    assert [e.weight_key for e in added] == ["farmer_reports_n_short"]
+    assert added[0].source == "farmer_reply" and len(ledger.rejected) == 2
 
 
 # ---------- supervisor ----------
 
 
-def test_supervisor_scores_the_union_of_specialist_evidence(harness):
-    result = harness(FULL_RUN)
-    (req,) = harness.calls["score"]
-    assert sorted(e.hypothesis for e in req.evidence) == ["disease_pest", "drought", "hail", "pivot_failure"]
-    assert req.crop == "corn" and req.stage == "R2 (blister)" and req.irrigated is True
-    assert harness.calls["roles"].count("imagery") >= 1
-    assert {"imagery", "environment", "agronomy"} <= set(harness.calls["roles"])
+def test_supervisor_scores_the_codes_evidence_plus_the_specialists_photo_findings(harness):
+    result = harness(FULL_RUN, context=_weak_context())
+    assert isinstance(result.structured_output, Diagnosis)
+    assert {"imagery", "environment", "agronomy"} <= set(harness.calls["roles"])  # a faint ring is not decisive
+    final = _score_payloads(harness.agent)[-1]
+    assert final["outcome"] in ("possible", "not_determined") and final["top_condition"] != "pivot_failure"
+    assert final["evidence_count"] >= 7  # the code's present keys, plus the specialists' photo finding
     assert harness.calls["impact"][0].condition == "pivot_failure"
     assert harness.calls["impact_extra"] == {"crop": "corn"}
-    assert isinstance(result.structured_output, Diagnosis)
 
 
 def test_supervisor_has_no_self_made_numbers(harness):
-    diag = harness(FULL_RUN, top=0.86).structured_output
-    # scorer said 86%, so "pretty sure"; the model's own "95%" and "23%" are removed, its how_sure is replaced
-    assert diag.how_sure == "pretty sure"
+    diag = harness(FAST_RUN, context=_ring_context()).structured_output
+    # the scorer named the ring "likely"; the model's own "95%" and "23%" are removed and its how_sure is replaced
+    assert diag.outcome == "likely" and diag.how_sure == "likely" and diag.condition == "pivot_failure"
     text = " ".join([diag.what, diag.where, diag.why, diag.action_detail])
     assert "95" not in text and "23" not in text and "%" not in text
-    assert (diag.dollars_low, diag.dollars_high) == (round(json.loads((FIXTURES / "impact_estimate.json").read_text())["low_usd"]),
-                                                     round(json.loads((FIXTURES / "impact_estimate.json").read_text())["high_usd"]))
+    impact = json.loads((FIXTURES / "impact_estimate.json").read_text())
+    assert (diag.dollars_low, diag.dollars_high) == (round(impact["low_usd"]), round(impact["high_usd"]))
+    assert "%" not in diag.to_text()
 
 
-def test_supervisor_says_not_sure_when_scorer_is_unsure(harness):
-    assert harness(FULL_RUN, top=0.4).structured_output.how_sure == "not sure yet"
+def test_supervisor_says_not_determined_when_the_evidence_does_not_name_a_cause(harness):
+    diag = harness(FULL_RUN, context=_weak_context()).structured_output
+    assert diag.outcome in ("possible", "not_determined") and diag.how_sure != "likely"
+    assert diag.condition != "pivot_failure"
 
 
 def test_supervisor_tools_never_include_specialist_only_or_unknown_writes():
@@ -238,22 +263,16 @@ def test_supervisor_tools_never_include_specialist_only_or_unknown_writes():
 # ---------- fast path (R1) ----------
 
 
-def test_fast_path_skips_specialists_when_precomputed_evidence_is_decisive(harness):
-    result = harness(FAST_RUN, top=0.93, context=_ring_context())
+def test_fast_path_skips_specialists_when_the_codes_evidence_is_decisive(harness):
+    result = harness(FAST_RUN, context=_ring_context())
     assert not {"imagery", "environment", "agronomy"} & set(harness.calls["roles"])
-    (req,) = harness.calls["score"]
-    assert [e.weight_key for e in req.evidence if e.direction == "supports"] == ["ring_pattern_strong"]
-    assert all(e.direction == "refutes" for e in req.evidence if e.weight_key != "ring_pattern_strong")
     assert harness.calls["impact"] and isinstance(result.structured_output, Diagnosis)
 
 
 def test_specialists_run_when_the_first_score_is_not_decisive(harness):
-    harness(FULL_RUN, top=0.7, context=_ring_context())
+    harness(FULL_RUN, context=_weak_context())
     assert {"imagery", "environment", "agronomy"} <= set(harness.calls["roles"])
-    assert len(harness.calls["score"]) == 2  # precheck, then the full score
-    # ring evidence deduplicated with imagery's: ring + 3 specialist refutes + the pattern-absence refutes from precheck
-    ring = [e for e in harness.calls["score"][1].evidence if e.weight_key == "ring_pattern_strong"]
-    assert len(ring) == 1
+    assert len(_score_payloads(harness.agent)) == 1  # the precheck is not a score_hypotheses call; this is the full one
 
 
 def test_specialist_tools_refuse_once_the_fast_path_is_decisive(monkeypatch):
@@ -265,26 +284,27 @@ def test_specialist_tools_refuse_once_the_fast_path_is_decisive(monkeypatch):
     assert log == [] and ledger.evidence == []
 
 
-def test_no_fast_path_without_precomputed_analysis(harness):
-    harness(FULL_RUN, top=0.99)
+def test_no_fast_path_without_the_fields_inputs(harness):
+    harness(FULL_RUN)
     assert "imagery" in harness.calls["roles"]  # nothing precomputed: specialists run
 
 
 # ---------- pure helpers ----------
 
 
-def test_evidence_from_analysis_and_hail_watch():
+def test_top_region_is_the_strongest_usable_region():
     analysis = json.loads((FIXTURES / "field_analysis_result.json").read_text())
-    items = agents.evidence_from_analysis(analysis, [{"type": "hail", "detail": {"max_hail_mm": 40}}])
-    supports = [(i.hypothesis, i.weight_key) for i in items if i.direction == "supports"]
-    assert supports == [("pivot_failure", "ring_pattern_strong"), ("hail", "hail_swath_overlap_high")]
+    assert agents.top_region(analysis).region_id == "r1"
     analysis["status"] = "too_cloudy"
-    assert agents.evidence_from_analysis(analysis) == []
+    assert agents.top_region(analysis) is None
 
 
-def test_how_sure_phrase_thresholds():
-    assert [how_sure_phrase(p) for p in (0.95, 0.8, 0.6, 0.3)] == [
-        "pretty sure", "pretty sure", "fairly sure", "not sure yet"]
+def test_how_sure_phrase_is_a_tier_never_a_number():
+    assert [how_sure_phrase(t) for t in ("likely", "possible", "not_determined")] == [
+        "likely", "possible, not confirmed", "not determined yet"]
+    assert [how_sure_phrase(p) for p in (0.95, 0.66, 0.4, 0.1)] == [
+        "likely", "likely", "possible, not confirmed", "not determined yet"]
+    assert how_sure_phrase(None) == "not determined yet"
 
 
 def test_scrub_percentages_keeps_only_allowed():
@@ -296,9 +316,13 @@ def test_supervisor_prompt_follows_farmer_text_rules():
     for banned in ("NDVI is", "z-score is"):
         assert banned not in agents.SUPERVISOR_PROMPT
     assert "You never make up how sure we are" in agents.SUPERVISOR_PROMPT
+    assert "NEVER guess a cause" in agents.SUPERVISOR_PROMPT
 
 
-def test_every_weight_key_we_emit_is_in_the_scorer_vocabulary():
-    vocab = {k for keys in agents.WEIGHT_KEYS.values() for k in keys}
-    assert {r[3] for r in agents.PATTERN_RULES} <= vocab
-    assert {e["weight_key"] for r in RESPONSES.values() for e in r["evidence"]} <= vocab
+def test_the_llm_vocabulary_is_only_photo_and_farmer_keys():
+    cat = scoring.load_catalog().conditions
+    for cid, keys in agents.WEIGHT_KEYS.items():
+        for k in keys:
+            assert cat[cid].weights[k].source in ("photo", "farmer"), (cid, k)
+    assert "ring_pattern_strong" not in {k for ks in agents.WEIGHT_KEYS.values() for k in ks}
+    assert "photo_tar_spot_lesions" in agents.WEIGHT_KEY_TEXT and "rain_normal_30d" not in agents.WEIGHT_KEY_TEXT

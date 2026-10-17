@@ -77,3 +77,12 @@ Voice → document upload → Bedrock Knowledge Base (keep a curated excerpt fil
 - The analyzer reports a `crop_state` (`pre_emergence`, `vegetative`, `reproductive`, `senescing`, `harvest_in_progress`, `harvested`, `unknown`) with `diagnosable` and `hail_only`; precedence and thresholds are in `agent/fieldwatch/analysis/phenology.py` and `harvest.py`.
 - **Late season is silent except hail.** From the start of senescence to the end of the season no stress diagnosis is emitted. The one exception is a sudden patchy drop on a scene still before senescence whose previous clear pass was clean (imagery only; radar confirmation is not required of the analyzer).
 - **Planting date: ask, with a smart default.** Optional per field; default is the state's typical 50%-planted date (USDA NASS Crop Progress), refined from the satellite green-up; the source is recorded.
+
+## D12. Diagnosis: evidence in code, "not determined" is an outcome (Oct 16)
+
+Source: `docs/research/grounding.md`. This refines D7.
+- `agent/fieldwatch/evidence.py` evaluates every catalog evidence key (`present` / `absent` / `not_evaluable`) from the field's inputs on every run. LLMs never choose keys; they may only add `photo` and `farmer` evidence as fixed fields.
+- Keys are `field`, `static` or `regional`. Regional evidence is capped at +-0.7 log-odds per condition, static at +-1.5; correlated items (a `cluster`) count once.
+- A condition is named only with a required field-evidence key, inside its stage window, with no rule-out, at 0.65 probability and 0.15 ahead of the runner-up. Otherwise the outcome is `not_determined` with "possible" candidates and a scouting pin. Farmer text uses likely / possible / not determined, never percentages.
+- Nitrogen is "possible nitrogen variation, please confirm" (red-edge sufficiency index, corn V6-V12) until the farmer reports N short. Disease and herbicide drift are never named from imagery alone.
+- On-demand checks (no anomaly) read the latest analysis' `crop_state` first; a non-diagnosable season is answered in code without agents. Pin location, acres and dollars come from code (`runfacts.py`), not the model. Chat replies are a structured `FarmerReply`, at most 320 characters.

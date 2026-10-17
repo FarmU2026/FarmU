@@ -1,0 +1,10 @@
+# Secret scanning (CI runs the gitleaks CLI against the repo; this file is picked up automatically).
+# Default rules, plus one narrow allowlist: evidence weight keys such as weight_key="rain_excess_30d" are
+# catalog identifiers, but the generic-api-key rule reads `..._key="..."` as a credential.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Catalog evidence identifiers (weight_key=\"snake_case\"), not secrets"
+regexTarget = "line"
+regexes = ['''weight_key\s*=\s*["'][a-z][a-z0-9_]*["']''']

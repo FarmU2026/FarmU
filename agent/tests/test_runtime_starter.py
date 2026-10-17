@@ -377,3 +377,20 @@ def test_runtime_arn_comes_from_loader_once():
     calls = []
     s = H.Starter(None, None, lambda: calls.append(1) or ARN)
     assert s.runtime_arn == ARN and s.runtime_arn == ARN and len(calls) == 1
+
+
+def test_a_question_about_one_field_never_gets_another_fields_pending_approval(chat):
+    """Live bug: a question about the South field was answered with 'still waiting for your YES on the Twin Creeks pin'."""
+    starter, table, runtime = chat
+    pending(table, interrupt="int-keep")  # awaiting_reply on north-pivot, the farm's newest investigation
+    out = starter.handle(reply(text="how is the river bottom looking?"))
+    req = C.StartInvestigation.model_validate(runtime.payload())
+    assert out["routed"] == "start" and req.field == "river-bottom" and req.about_investigation_id is None
+    # naming the field that has the pending approval while replying to its alert keeps that context
+    starter.handle(reply(text="what about north pivot?", reply_id="rep-002", investigation_id="inv-north-pivot-20260718"))
+    req = C.StartInvestigation.model_validate(runtime.payload())
+    assert req.field == "north-pivot" and req.about_investigation_id == "inv-north-pivot-20260718"
+    # a reply to the alert that names another field's investigation is dropped when the text names a different field
+    starter.handle(reply(text="and the river bottom?", reply_id="rep-003", investigation_id="inv-north-pivot-20260718"))
+    req = C.StartInvestigation.model_validate(runtime.payload())
+    assert req.field == "river-bottom" and req.about_investigation_id is None

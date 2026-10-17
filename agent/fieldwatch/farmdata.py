@@ -114,6 +114,32 @@ def _latest_scan(field_id: str) -> dict | None:
             "cloud_free": (r.get("clear_fraction") or 0) >= 0.7}
 
 
+def latest_analysis(field_id: str) -> dict | None:
+    """The newest fw-scene-analyses row for a field as one flat dict (a nested `result` is merged in), or None.
+    Dynamo backend only: the fixture farm carries a one-line summary, not an analysis."""
+    if backend() != "dynamo":
+        return None
+    from boto3.dynamodb.conditions import Key
+
+    page = _table("scene-analyses").query(KeyConditionExpression=Key("field_id").eq(field_id),
+                                          ScanIndexForward=False, Limit=10)
+    for raw in page.get("Items", []):
+        row = _plain(raw)
+        flat = {**(row.get("result") or {}), **{k: v for k, v in row.items() if k != "result"}}
+        flat.setdefault("date", str(row.get("date_source", "")).split("#")[0])
+        flat["field_id"] = field_id
+        return flat
+    return None
+
+
+def field_context_row(field_id: str) -> dict | None:
+    """The fw-field-context item for a field (dynamo backend), or None."""
+    if backend() != "dynamo":
+        return None
+    item = _table("field-context").get_item(Key={"field_id": field_id}).get("Item")
+    return _plain(item) if item else None
+
+
 def _load_dynamo(farm_id: str) -> dict:
     from boto3.dynamodb.conditions import Key
 

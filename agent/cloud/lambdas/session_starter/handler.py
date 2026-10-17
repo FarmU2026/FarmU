@@ -175,8 +175,13 @@ class Starter:
             return self._drop("ReplyReceived", "nothing_to_answer")
         question = MORE_QUESTION if ev.intent == "more" else text[:480]
         fields = self._fields(ev.farm_id)
-        about = self._about(ev, fields)
-        field = self._pick_field(text, fields, about)
+        # The field the question is about: the one the text names, else the field of the alert being replied to, else
+        # the newest recent one. Another field's investigation is never attached (its pending approval would bleed in).
+        named = self._named_field(text, fields)
+        about = self._about(ev, fields, named)
+        field = named or self._pick_field(text, fields, about)
+        if about and about.get("field_id") != field:
+            about = None
         if not field:
             return self._drop("ReplyReceived", "question_without_a_field")
         req = C.StartInvestigation(investigation_id=question_id_for(ev.reply_id), farm_id=ev.farm_id, field=field,
@@ -188,16 +193,20 @@ class Starter:
             return []
         return self.fields_table.query(KeyConditionExpression=Key("farm_id").eq(farm_id)).get("Items", [])
 
-    def _about(self, ev: C.ReplyReceived, fields: list[dict]) -> dict | None:
-        """The investigation a question is about: the one the reply names, else the farm's newest recent one.
-        Question runs themselves never count, and neither does another farm's item."""
+    def _about(self, ev: C.ReplyReceived, fields: list[dict], field_id: str | None = None) -> dict | None:
+        """The investigation a question is about: the one the reply names, else the newest recent one of the field the
+        text names (or, when no field is named, of any field). Question runs themselves never count, and neither does
+        another farm's item or another field's."""
         if ev.investigation_id:
             item = self.table.get_item(Key={"investigation_id": ev.investigation_id}).get("Item")
-            if item and item.get("farm_id") == ev.farm_id and item.get("kind") != "question":
+            if (item and item.get("farm_id") == ev.farm_id and item.get("kind") != "question"
+                    and (field_id is None or item.get("field_id") == field_id)):
                 return item
         cutoff = (datetime.now(timezone.utc) - timedelta(days=CONTEXT_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
         found = []
         for f in fields:
+            if field_id is not None and f["field_id"] != field_id:
+                continue
             page = self.table.query(IndexName="by-field", KeyConditionExpression=Key("field_id").eq(f["field_id"]),
                                     ScanIndexForward=False, Limit=10)
             found += [i for i in page.get("Items", []) if i.get("farm_id") == ev.farm_id and i.get("kind") != "question"
@@ -205,9 +214,8 @@ class Starter:
         return max(found, key=lambda i: i["created_at"], default=None)
 
     @staticmethod
-    def _pick_field(text: str, fields: list[dict], about: dict | None) -> str | None:
-        """The field the text names (case-insensitive, by name or id; longest name wins), else the investigation's
-        field, else the farm's first."""
+    def _named_field(text: str, fields: list[dict]) -> str | None:
+        """The field the text names (case-insensitive, by name or id; longest name wins), or None."""
         low = text.lower()
 
         def mentioned(f: dict) -> bool:  # whole words, so a field called "A" is not found in every sentence
@@ -215,8 +223,14 @@ class Starter:
                        for n in (str(f.get("name", "")).lower(), f["field_id"].lower()))
 
         named = [f for f in fields if mentioned(f)]
+        return max(named, key=lambda f: len(str(f.get("name", "")))).get("field_id") if named else None
+
+    @classmethod
+    def _pick_field(cls, text: str, fields: list[dict], about: dict | None) -> str | None:
+        """The field the text names, else the investigation's field, else the farm's first."""
+        named = cls._named_field(text, fields)
         if named:
-            return max(named, key=lambda f: len(str(f.get("name", "")))).get("field_id")
+            return named
         if about and about.get("field_id"):
             return about["field_id"]
         return fields[0]["field_id"] if fields else None
