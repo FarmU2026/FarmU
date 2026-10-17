@@ -556,8 +556,8 @@ def run_request(req: C.StartInvestigation | C.ResumeInvestigation, recorder: Rec
                     gated = True
                     step = Step(status="done", text=message)
                 else:
-                    step = start(inv, req.field, emit=rec.on_hook_event, context=_recall_context(rec, req),
-                                 anomaly=req.anomaly)
+                    extra = {"anomaly": req.anomaly} if req.anomaly is not None else {}
+                    step = start(inv, req.field, emit=rec.on_hook_event, context=_recall_context(rec, req), **extra)
     except Exception as exc:
         log.exception("investigation %s failed", inv)
         # a failed resume keeps its interrupt, so the starter can try the same answer again

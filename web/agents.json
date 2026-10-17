@@ -241,7 +241,7 @@
       {
         "name": "precheck_evidence",
         "label": "Check what we already know",
-        "description": "FIRST STEP. Score the precomputed evidence for this field (pattern analysis and open watches). If the answer is decisive the result says fast_path true: skip the specialists and go to impact.",
+        "description": "FIRST STEP. Weigh everything FieldWatch can work out from the satellite pass, soil, weather, hail, drought, county reports and growth stage. Returns the outcome (likely, possible or not_determined), the named cause if any, what is possible, what was ruled out and what to scout. If fast_path is true the answer is decisive: skip the specialists and go to impact.",
         "sources": [
           "scene_store",
           "conditions"
@@ -250,7 +250,7 @@
       {
         "name": "score_hypotheses",
         "label": "Turn evidence into percents",
-        "description": "Score every piece of evidence gathered so far. Call it after the specialists answer, and again if new evidence arrives. Returns each condition's percent and status, how_sure wording and close_call. Use ONLY these numbers and this wording for how sure we are.",
+        "description": "Score all the evidence gathered so far. Call it after the specialists answer, and again if new evidence arrives. Returns the outcome (likely, possible or not_determined), the named cause if any, what is possible, what was ruled out, what to scout and the how_sure wording. Use ONLY this outcome and wording for how sure we are, and never quote a percent.",
         "sources": [
           "conditions"
         ]
@@ -258,7 +258,7 @@
       {
         "name": "estimate_impact",
         "label": "Dollar range at stake",
-        "description": "Dollar range at stake for the likely condition on the affected acres, from published loss tables. condition is a condition id from the score result. Pass crop, expected_yield and price from the field when you know them. Use these dollar figures as given.",
+        "description": "Dollar range at stake for the named condition on the affected acres, from published loss tables. condition is a condition id from the score result. Pass crop, expected_yield and price from the field when you know them. Use these dollar figures as given.",
         "sources": [
           "loss_tables"
         ]
@@ -280,7 +280,7 @@
       {
         "name": "create_scout_pin",
         "label": "Scouting pin for the field",
-        "description": "Drop a scouting pin with coordinates and what to look for. Requires farmer approval.",
+        "description": "Drop a scouting pin with coordinates and what to look for. Requires farmer approval. The location is the flagged problem area's, set by FieldWatch.",
         "sources": [
           "notify"
         ],

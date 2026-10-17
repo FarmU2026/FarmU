@@ -71,3 +71,12 @@ Voice → document upload → Bedrock Knowledge Base (keep a curated excerpt fil
 | Aaron | 1 Field analyzer, 5 Scorer + condition catalog + impact + agent reasoning |
 | Caleb | Integration, reviews, deploys, agronomy weights, hero scenes (11) |
 | Claude agents (Caleb reviews) | 12 Web API, 13 Live feed, 14 Front end on CloudFront, 2 Scene pipeline + replay, 15 Context builder workflow, 6 Gateway + tools, 7 Agent on Runtime, 8 Approvals + policy; then 16 Knowledge base, 17 Photo intake, 11 Evaluations |
+
+## D11. Diagnosis: evidence in code, "not determined" is an outcome (Oct 16)
+
+Source: `docs/research/grounding.md`. This refines D7.
+- `agent/fieldwatch/evidence.py` evaluates every catalog evidence key (`present` / `absent` / `not_evaluable`) from the field's inputs on every run. LLMs never choose keys; they may only add `photo` and `farmer` evidence as fixed fields.
+- Keys are `field`, `static` or `regional`. Regional evidence is capped at +-0.7 log-odds per condition, static at +-1.5; correlated items (a `cluster`) count once.
+- A condition is named only with a required field-evidence key, inside its stage window, with no rule-out, at 0.65 probability and 0.15 ahead of the runner-up. Otherwise the outcome is `not_determined` with "possible" candidates and a scouting pin. Farmer text uses likely / possible / not determined, never percentages.
+- Nitrogen is "possible nitrogen variation, please confirm" (red-edge sufficiency index, corn V6-V12) until the farmer reports N short. Disease and herbicide drift are never named from imagery alone.
+- On-demand checks (no anomaly) read the latest analysis' `crop_state` first; a non-diagnosable season is answered in code without agents. Pin location, acres and dollars come from code (`runfacts.py`), not the model. Chat replies are a structured `FarmerReply`, at most 320 characters.
