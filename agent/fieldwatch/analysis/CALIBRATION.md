@@ -129,3 +129,11 @@ Columns: as_of, scene date used, clear fraction, z_baseline, field NDVI median, 
 Reading the table: NW/SW (uniform corn) never emit in summer, before or after, and end-of-season rows are all gated
 (gates 1xx). The mixed-polygon rows keep emitting on bare ground, waterways and other crops inside the polygon;
 that is correct for what is in the polygon, and the fix is a field boundary that matches one field.
+
+## Crop state (harvest, maturity, hail)
+
+`phenology.py` / `harvest.py` hold every threshold in one block, tagged with the research memo (docs/research/grounding.md) or `[design]`.
+Synthetic fixtures (tests/test_crop_state.py) cover full and partial harvest (half the field drops ~0.4 NDVI, straight edge, median stays high),
+the mid-July problem patch (still emits), and a late-August hail-like patch (emits with `hail_only`). Real check: the house field (Thurston Co. NE,
+corn, harvested early October 2026) reads `harvested` on 2026-10-10 and `diagnosable` on 2026-07-18. Not yet tuned on labelled data:
+the 0.25 harvest drop, the 0.12 hail drop, the soybean degree-day table.

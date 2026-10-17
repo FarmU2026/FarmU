@@ -457,3 +457,32 @@ def test_analyzer_end_to_end_partial_harvest_in_october():
 
     res = analyze(req("2026-10-15"), loader=Half(lv), writer=NullWriter(), weather=warm)
     assert res.crop_state.state == "harvest_in_progress" and not res.crop_state.diagnosable
+
+
+# ---------- live: the founder's house field, harvested in early October 2026 ----------
+
+HOUSE = [(-96.6823963, 42.1768555), (-96.6824607, 42.170132), (-96.6756816, 42.1718169), (-96.6761535, 42.1768714),
+         (-96.6823963, 42.1768555)]
+
+
+def _house(as_of):
+    import os
+    if os.getenv("FIELDWATCH_LIVE") != "1":
+        pytest.skip("set FIELDWATCH_LIVE=1")
+    return analyze(req(as_of).model_copy(update={"polygon": HOUSE}), writer=NullWriter())
+
+
+@pytest.mark.live
+def test_live_house_field_after_harvest_is_not_diagnosable():
+    res = _house("2026-10-10")
+    assert res.status in ("ok", "no_baseline") and res.crop_state is not None, res.error
+    print("house 2026-10-10:", res.date, res.crop_state.model_dump())
+    assert res.crop_state.state in ("senescing", "harvest_in_progress", "harvested") and not res.crop_state.diagnosable
+
+
+@pytest.mark.live
+def test_live_house_field_in_july_is_diagnosable():
+    res = _house("2026-07-18")
+    assert res.crop_state is not None, res.error
+    print("house 2026-07-18:", res.date, res.crop_state.model_dump())
+    assert res.crop_state.diagnosable and res.crop_state.state in ("vegetative", "reproductive", "unknown")

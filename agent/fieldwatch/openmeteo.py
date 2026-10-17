@@ -16,7 +16,10 @@ def archive_daily(lat: float, lon: float, start: date, end: date, daily: str, *,
     `units` are extra query params such as temperature_unit="fahrenheit". Raises on network or format errors."""
     params = {"latitude": lat, "longitude": lon, "start_date": start.isoformat(), "end_date": end.isoformat(),
               "daily": daily, "timezone": "America/Chicago", **units}
-    return http_get(ARCHIVE_URL, params=params, timeout=timeout).json()["daily"]
+    body = http_get(ARCHIVE_URL, params=params, timeout=timeout).json()
+    if "daily" not in body:  # rate limit or bad request: say why instead of a bare KeyError
+        raise RuntimeError(f"Open-Meteo: {body.get('reason', 'no daily data in the response')}")
+    return body["daily"]
 
 
 def daily_temps_f(lat: float, lon: float, start: date, end: date, *,
