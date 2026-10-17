@@ -1,0 +1,83 @@
+{
+ "_comment": "Typical 50%-planted date per state. REGENERATE with agent/scripts/build_planting_defaults.py (NASS Quick Stats, multi-year median of each year's 50% date).",
+ "method": "hand-built interim: the 2021-2025 average column of the weekly USDA NASS Crop Progress releases of Apr-Jun 2026, percent planted for the 7 states, linearly interpolated to 50% between the two week-ending dates that straddle it (accuracy about +-2 days). This is the crossing date of the 5-year average curve, not the median of yearly crossing dates.",
+ "source": "USDA NASS Crop Progress, https://esmis.nal.usda.gov/publication/crop-progress (releases prog1726..prog2426, April 27 - June 15, 2026; 'Corn Planted' and 'Soybeans Planted - Selected States' tables)",
+ "years": "2021-2025",
+ "verified": "all 14 entries read from the primary NASS releases (not recalled from memory)",
+ "crops": {
+  "corn": {
+   "IA": {
+    "median_50pct_planted": "05-05",
+    "basis": "avg 44% on 2026-05-03, 63% on 2026-05-10",
+    "verified": true
+   },
+   "IL": {
+    "median_50pct_planted": "05-08",
+    "basis": "avg 36% on 2026-05-03, 54% on 2026-05-10",
+    "verified": true
+   },
+   "KS": {
+    "median_50pct_planted": "05-07",
+    "basis": "avg 42% on 2026-05-03, 55% on 2026-05-10",
+    "verified": true
+   },
+   "MN": {
+    "median_50pct_planted": "05-08",
+    "basis": "avg 33% on 2026-05-03, 55% on 2026-05-10",
+    "verified": true
+   },
+   "MO": {
+    "median_50pct_planted": "04-30",
+    "basis": "avg 42% on 2026-04-26, 57% on 2026-05-03",
+    "verified": true
+   },
+   "NE": {
+    "median_50pct_planted": "05-07",
+    "basis": "avg 39% on 2026-05-03, 60% on 2026-05-10",
+    "verified": true
+   },
+   "SD": {
+    "median_50pct_planted": "05-12",
+    "basis": "avg 43% on 2026-05-10, 65% on 2026-05-17",
+    "verified": true
+   }
+  },
+  "soybeans": {
+   "IA": {
+    "median_50pct_planted": "05-11",
+    "basis": "avg 48% on 2026-05-10, 68% on 2026-05-17",
+    "verified": true
+   },
+   "IL": {
+    "median_50pct_planted": "05-11",
+    "basis": "avg 47% on 2026-05-10, 63% on 2026-05-17",
+    "verified": true
+   },
+   "KS": {
+    "median_50pct_planted": "05-21",
+    "basis": "avg 44% on 2026-05-17, 56% on 2026-05-24",
+    "verified": true
+   },
+   "MN": {
+    "median_50pct_planted": "05-16",
+    "basis": "avg 33% on 2026-05-10, 53% on 2026-05-17",
+    "verified": true
+   },
+   "MO": {
+    "median_50pct_planted": "05-20",
+    "basis": "avg 45% on 2026-05-17, 57% on 2026-05-24",
+    "verified": true
+   },
+   "NE": {
+    "median_50pct_planted": "05-12",
+    "basis": "avg 44% on 2026-05-10, 65% on 2026-05-17",
+    "verified": true
+   },
+   "SD": {
+    "median_50pct_planted": "05-18",
+    "basis": "avg 46% on 2026-05-17, 65% on 2026-05-24",
+    "verified": true
+   }
+  }
+ }
+}

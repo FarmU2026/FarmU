@@ -3,7 +3,7 @@
     POST /api/farms                                   create farm + people + fields; start context build; scene check
     GET  /api/farms/{farm_id}                         farm + fields (+ stats) + thread (THREAD# items)
     POST   /api/farms/{farm_id}/fields                add a field {name, crop, polygon}; returns the farm view
-    PATCH  /api/farms/{farm_id}/fields/{field_id}     edit {name?, crop?, polygon?}; field_id never changes
+    PATCH  /api/farms/{farm_id}/fields/{field_id}     edit {name?, crop?, polygon?, planting_date?}; field_id never changes
     DELETE /api/farms/{farm_id}/fields/{field_id}     stop watching the field (history rows are kept)
     POST /api/farms/{farm_id}/check                   invoke the scenes check-latest Lambda for the farm's fields
     POST /api/farms/{farm_id}/fields/{field_id}/ask   StartInvestigation on the bus
@@ -18,6 +18,7 @@ from __future__ import annotations
 import math
 import os
 import re
+from datetime import date, timedelta
 from typing import get_args
 
 from pydantic import BaseModel, Field
@@ -38,6 +39,7 @@ class FieldIn(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     crop: str = "corn"
     polygon: list[list[float]] = Field(description="[[lat, lon], ...] as clicked on the map")
+    planting_date: str | None = Field(default=None, description="optional YYYY-MM-DD; blank = the state's typical date")
 
 
 class FarmIn(BaseModel):
@@ -54,12 +56,29 @@ class FieldAddIn(BaseModel):
     name: str = Field(max_length=80)
     crop: str = "corn"
     polygon: list[list[float]]
+    planting_date: str | None = None
 
 
 class FieldPatchIn(BaseModel):
     name: str | None = Field(default=None, max_length=80)
     crop: str | None = None
     polygon: list[list[float]] | None = None
+    planting_date: str | None = Field(default=None, description="YYYY-MM-DD; null or blank clears it")
+
+
+def _valid_planting_date(value: str | None) -> str | None:
+    """Optional planting date: blank -> None; else a real date from last year to a month ahead (a planned planting)."""
+    value = (value or "").strip()
+    if not value:
+        return None
+    try:
+        d = date.fromisoformat(value)
+    except ValueError:
+        raise ApiError("INVALID_INPUT", "planting_date: use the form YYYY-MM-DD") from None
+    today = date.today()
+    if not (date(today.year - 1, 1, 1) <= d <= today + timedelta(days=30)):
+        raise ApiError("INVALID_INPUT", "planting_date: must be this season's date (not in the far past or future)")
+    return d.isoformat()
 
 
 def _crop(c: str) -> str:
@@ -75,6 +94,7 @@ def create_farm(req: Request):
     for f in body.fields:
         if len(f.polygon) < 3 or any(len(p) != 2 for p in f.polygon):
             raise ApiError("INVALID_INPUT", f"field {f.name!r} needs at least 3 [lat, lon] points")
+        _valid_planting_date(f.planting_date)
 
     now = _aws.now_iso()
     phone = store.e164(body.phone)
@@ -110,6 +130,8 @@ def create_farm(req: Request):
             "acres": store.acres_latlon(f.polygon), "irrigation": "unknown", "irrigated": None,
             "polygon": polygon, "status": "building", "created_at": now,
         }
+        if f.planting_date and f.planting_date.strip():
+            item["planting_date"] = _valid_planting_date(f.planting_date)
         if _aws.bucket():
             key = f"fields/{fid}/geometry.geojson"
             _aws.client("s3").put_object(Bucket=_aws.bucket(), Key=key, ContentType="application/geo+json",
@@ -217,11 +239,14 @@ def add_field(req: Request):
     name = _valid_name(body.name, existing)
     crop = _valid_crop(body.crop)
     latlon = _valid_polygon(body.polygon)
+    planting = _valid_planting_date(body.planting_date)
     fid = _new_field_id(farm_id, name, {f["field_id"] for f in existing})
     polygon = [[lon, lat] for lat, lon in latlon]
     item = {"farm_id": farm_id, "field_id": fid, "name": name, "crop": crop, "crop_current": crop,
             "acres": store.acres_latlon(latlon), "irrigation": "unknown", "irrigated": None,
             "polygon": polygon, "status": "building", "created_at": _aws.now_iso()}
+    if planting:
+        item["planting_date"] = planting
     key = _write_geometry(fid, name, polygon)
     if key:
         item["geometry_key"] = key
@@ -241,6 +266,8 @@ def update_field(req: Request):
         sets["name"] = _valid_name(body.name, [f for f in store.list_fields(farm_id) if f["field_id"] != field_id])
     if body.crop is not None:
         sets["crop"] = sets["crop_current"] = _valid_crop(body.crop)
+    if "planting_date" in body.model_fields_set:  # null / blank clears it (the state's typical date is used again)
+        sets["planting_date"] = _valid_planting_date(body.planting_date)
     redrawn = body.polygon is not None
     if redrawn:
         latlon = _valid_polygon(body.polygon)
@@ -248,7 +275,7 @@ def update_field(req: Request):
         sets["acres"] = store.acres_latlon(latlon)
         sets["status"] = "building"
     if not sets:
-        raise ApiError("INVALID_INPUT", "send at least one of name, crop, polygon")
+        raise ApiError("INVALID_INPUT", "send at least one of name, crop, polygon, planting_date")
     if redrawn or "name" in sets:
         key = _write_geometry(field_id, sets.get("name", field.get("name", field_id)),
                               sets.get("polygon") or field.get("polygon") or [])

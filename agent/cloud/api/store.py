@@ -273,6 +273,7 @@ def ui_field(field: dict, with_stats: bool = True) -> dict:
         "irrigation": field.get("irrigation", "unknown"),
         "polygon": field.get("polygon") or [],
         "status": field.get("status"),
+        "planting_date": field.get("planting_date"),
     }
     if with_stats:
         row = latest_analysis(field["field_id"])

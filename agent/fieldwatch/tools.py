@@ -11,11 +11,10 @@ import json
 import re
 from datetime import date, timedelta
 
-import requests
 from strands import tool
 from strands.types.tools import ToolContext, ToolResult
 
-from . import actions, approvals, farmdata, interfaces
+from . import actions, approvals, farmdata, interfaces, openmeteo
 from . import contracts as C
 from .contracts import Approval
 
@@ -109,16 +108,9 @@ def get_weather(field_id: str) -> dict:
     end = date.today() - timedelta(days=2)  # archive lags a couple of days
     start = end - timedelta(days=30)
     try:
-        resp = requests.get(
-            "https://archive-api.open-meteo.com/v1/archive",
-            params={
-                "latitude": lat, "longitude": lon,
-                "start_date": start.isoformat(), "end_date": end.isoformat(),
-                "daily": "precipitation_sum,temperature_2m_max",
-                "precipitation_unit": "inch", "temperature_unit": "fahrenheit", "timezone": "America/Chicago",
-            },
-            timeout=20,
-        ).json()["daily"]
+        resp = openmeteo.archive_daily(
+            lat, lon, start, end, "precipitation_sum,temperature_2m_max",
+            precipitation_unit="inch", temperature_unit="fahrenheit")
     except Exception as e:
         return {"field": f["name"], "error": f"weather unavailable: {e}"}
     rain = [x or 0 for x in resp["precipitation_sum"]]
