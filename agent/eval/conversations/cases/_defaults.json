@@ -1,0 +1,11 @@
+{
+  "must_not_mention": [
+    "@internal_ids",
+    "@index_numbers",
+    "@jargon",
+    "@percentages"
+  ],
+  "max_chars": 320,
+  "ascii_only": true,
+  "answers_within_s": 90
+}

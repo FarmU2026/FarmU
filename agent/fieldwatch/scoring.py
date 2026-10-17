@@ -332,6 +332,14 @@ def prior_probability(condition: str, crop: str, stage: str | None = None, irrig
 _CLASS_ORDER = {"field": 0, "static": 1, "regional": 2}
 
 
+HAIL_EXCEPTION = "hail_exception=True"  # the exact token the analyzer's phenology puts in CropState.reasons
+
+
+def hail_allowed(cs: C.CropState | None) -> bool:
+    """Late season is silent except hail: only a crop state with hail_only AND the analyzer's hail exception may alert."""
+    return cs is not None and cs.hail_only and HAIL_EXCEPTION in cs.reasons
+
+
 def _score(req: C.ScoreRequest, crop_state: C.CropState | None = None) -> dict[str, dict[str, Any]]:
     cat = load_catalog()
     stage = (crop_state.stage_label if crop_state and crop_state.stage_label else None) or req.stage
@@ -403,9 +411,9 @@ def _score(req: C.ScoreRequest, crop_state: C.CropState | None = None) -> dict[s
             continue
         if cond.requires_irrigated and req.irrigated is False:
             d["gate"].append("the field is not irrigated")
-        if crop_state is not None and not crop_state.diagnosable and not (crop_state.hail_only and cid == "hail"):
+        if crop_state is not None and not crop_state.diagnosable and not (hail_allowed(crop_state) and cid == "hail"):
             d["gate"].append(f"the season is over for this field ({crop_state.state.replace('_', ' ')})")
-        elif not (crop_state is not None and crop_state.hail_only and cid == "hail"):
+        elif not (hail_allowed(crop_state) and cid == "hail"):
             ok, why = window_check(cid, req.crop, span)
             if not ok:
                 d["gate"].append(why)

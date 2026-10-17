@@ -1,0 +1,21 @@
+{
+  "name": "problem-why",
+  "description": "Real problem field: the stated cause is the recorded one.",
+  "field": "north pivot",
+  "record": "required",
+  "setup": {
+    "ask_first": true
+  },
+  "turns": [
+    {
+      "say": "why do you think that about {field}?",
+      "checks": {
+        "consistent_with_record": {
+          "require_cause": true
+        },
+        "no_new_numbers": true
+      },
+      "rubric": "Names the same likely cause as the record and the evidence behind it in plain words, without inventing evidence."
+    }
+  ]
+}

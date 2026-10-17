@@ -677,7 +677,7 @@ def determine(inputs: FieldInputs, extra: list[C.EvidenceItem] | None = None) ->
 def situation(inputs: FieldInputs) -> str:
     """Why there may be nothing to diagnose: ok | season_over | no_analysis | no_clear_pass | no_problem_area."""
     cs = inputs.state()
-    if cs is not None and not cs.diagnosable and not cs.hail_only:
+    if cs is not None and not cs.diagnosable and not scoring.hail_allowed(cs):
         return "season_over"
     a = inputs.analysis
     if a is None:
@@ -708,7 +708,7 @@ def _nice_date(iso: str | None) -> str:
 def season_message(state: C.CropState | None, field_name: str, as_of: str | None) -> str | None:
     """Plain words for a field FieldWatch has paused checks on, or None when checks may run (no state, diagnosable, or
     hail-only, which still allows hail). Used by the on-demand gate and the chat context."""
-    if state is None or state.diagnosable or state.hail_only:
+    if state is None or state.diagnosable or scoring.hail_allowed(state):
         return None
     name = " ".join(str(field_name).split()) or "The field"
     subject = f"The {name}" if "field" in name.lower() else name[:1].upper() + name[1:]

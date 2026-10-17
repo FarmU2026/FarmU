@@ -1,0 +1,17 @@
+{
+  "name": "chitchat-thanks",
+  "description": "A thank-you: acknowledge briefly, start no work, claim no actions.",
+  "field": "north pivot",
+  "turns": [
+    {
+      "say": "thanks",
+      "checks": {
+        "no_action_items": true,
+        "must_not_mention": [
+          "(work order|ticket|pin|repair).{0,30}(sent|created|opened|dispatched|on its way|is done)"
+        ]
+      },
+      "rubric": "A brief acknowledgement. No new claims, no promised actions."
+    }
+  ]
+}

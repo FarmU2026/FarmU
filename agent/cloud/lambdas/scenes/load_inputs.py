@@ -74,6 +74,7 @@ def load_request(event: dict) -> dict:
         scene=scene,
         pivot=pivot,
         open_watch_ids=watch_ids_open_at(ref.field_id, scene_dt),
+        planting_date=str(row["planting_date"]) if row.get("planting_date") else None,
         **thresholds(),
     )
     return request.model_dump(mode="json")

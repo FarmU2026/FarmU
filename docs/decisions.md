@@ -72,7 +72,13 @@ Voice → document upload → Bedrock Knowledge Base (keep a curated excerpt fil
 | Caleb | Integration, reviews, deploys, agronomy weights, hero scenes (11) |
 | Claude agents (Caleb reviews) | 12 Web API, 13 Live feed, 14 Front end on CloudFront, 2 Scene pipeline + replay, 15 Context builder workflow, 6 Gateway + tools, 7 Agent on Runtime, 8 Approvals + policy; then 16 Knowledge base, 17 Photo intake, 11 Evaluations |
 
-## D11. Diagnosis: evidence in code, "not determined" is an outcome (Oct 16)
+## D11. Crop state before diagnosis (founder, 2026-10-16)
+
+- The analyzer reports a `crop_state` (`pre_emergence`, `vegetative`, `reproductive`, `senescing`, `harvest_in_progress`, `harvested`, `unknown`) with `diagnosable` and `hail_only`; precedence and thresholds are in `agent/fieldwatch/analysis/phenology.py` and `harvest.py`.
+- **Late season is silent except hail.** From the start of senescence to the end of the season no stress diagnosis is emitted. The one exception is a sudden patchy drop on a scene still before senescence whose previous clear pass was clean (imagery only; radar confirmation is not required of the analyzer).
+- **Planting date: ask, with a smart default.** Optional per field; default is the state's typical 50%-planted date (USDA NASS Crop Progress), refined from the satellite green-up; the source is recorded.
+
+## D12. Diagnosis: evidence in code, "not determined" is an outcome (Oct 16)
 
 Source: `docs/research/grounding.md`. This refines D7.
 - `agent/fieldwatch/evidence.py` evaluates every catalog evidence key (`present` / `absent` / `not_evaluable`) from the field's inputs on every run. LLMs never choose keys; they may only add `photo` and `farmer` evidence as fixed fields.

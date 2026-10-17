@@ -130,7 +130,7 @@ def test_hail_with_a_field_drop_and_the_stage_in_window_is_named():
 
 
 def test_hail_is_still_allowed_when_the_season_is_otherwise_over():
-    state = C.CropState(state="senescing", diagnosable=False, hail_only=True)
+    state = C.CropState(state="senescing", diagnosable=False, hail_only=True, reasons=["hail_exception=True"])
     a = analysis(state=state, hail_swath_overlap=0.8)
     hail = C.HailReport(field_id="x", start="2026-08-01", end="2026-08-20", max_hail_mm=40.0, pct_area_over_threshold=60)
     _, det = E.determine(inputs(stage="R5", analysis=a, hail=hail))
@@ -256,7 +256,8 @@ def test_season_gate_messages_and_exceptions():
     assert E.season_message(st("harvested"), "South field", "2026-10-08") == \
         "The South field looks harvested as of Oct 8, so FieldWatch has paused problem checks for this season."
     assert "harvest is under way" in E.season_message(st("harvest_in_progress"), "South field", "2026-10-02")
-    assert E.season_message(st("senescing", hail_only=True), "South field", "2026-10-02") is None  # hail still allowed
+    assert E.season_message(st("senescing", hail_only=True, reasons=["hail_exception=True"]), "South field", "2026-10-02") is None  # hail still allowed
+    assert "paused" in E.season_message(st("senescing", hail_only=True), "South field", "2026-10-02")  # no hail exception: silent
     assert E.season_message(veg("V8"), "South field", "2026-07-02") is None and E.season_message(None, "x", None) is None
 
 

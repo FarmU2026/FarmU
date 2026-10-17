@@ -1,0 +1,27 @@
+{
+  "name": "harvested-done",
+  "description": "Harvested/mature field: 'is it done?' says harvested or mature, no diagnosis.",
+  "field": "home field",
+  "record": "none",
+  "turns": [
+    {
+      "say": "is my {field} done?",
+      "checks": {
+        "must_mention_any": [
+          "harvest",
+          "mature",
+          "maturity",
+          "done for the season",
+          "finished",
+          "dry(ing)? down",
+          "senesc",
+          "end of (the )?season",
+          "ready"
+        ],
+        "no_cause_claimed": true,
+        "no_new_numbers": true
+      },
+      "rubric": "Says the field looks harvested or mature (end of season); invents no problem or diagnosis; short and plain."
+    }
+  ]
+}

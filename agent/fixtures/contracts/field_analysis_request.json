@@ -36,5 +36,6 @@
   "open_watch_ids": [],
   "min_clear_fraction": 0.7,
   "min_region_acres": 1.2,
-  "z_threshold": 2.0
+  "z_threshold": 2.0,
+  "planting_date": "2026-05-06"
 }

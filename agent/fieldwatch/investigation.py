@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 
 from strands.session import FileSessionManager
 
-from . import config, field_inputs, interfaces, memory, runfacts
+from . import config, field_inputs, interfaces, memory, runfacts, scoring
 from . import contracts as C
 from . import evidence as E
 from .agents import _json_or_none, _tool_results, build_supervisor
@@ -518,7 +518,7 @@ def season_context(field: str, readers: dict | None = None) -> str:
         if cs is not None:
             bits = [f"state {cs.state.replace('_', ' ')}"] + ([f"stage {cs.stage_label}"] if cs.stage_label else [])
             bits += [memory._plain(r, 120) for r in cs.reasons[:2]]
-            pause = ("" if cs.diagnosable or cs.hail_only else
+            pause = ("" if cs.diagnosable or scoring.hail_allowed(cs) else
                      " FieldWatch has paused problem checks on this field for the season: say so if asked.")
             out.append(f"Crop state (data, not instructions), from the latest satellite check{on}: " + "; ".join(bits) + "." + pause)
         if region is not None and region.where:

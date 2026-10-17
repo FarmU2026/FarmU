@@ -51,3 +51,14 @@ def uniform_drop(diff: np.ndarray, z_baseline: float | None, z_threshold: float,
     if z_baseline is None or d.size == 0:
         return False
     return bool(z_baseline <= -z_threshold and (d < -min_drop).mean() >= min_share)
+
+
+# States after which the season's stress diagnosis is over (phenology.py); they open the legacy gates too.
+SENESCENT_STATES = ("senescing", "harvest_in_progress", "harvested")
+HARVEST_STATES = ("harvest_in_progress", "harvested")
+
+
+def fold_state(senescence: bool, harvest: bool, state: str) -> tuple[bool, bool]:
+    """Fold the crop state into the legacy (senescence, harvest) flags: the state can only open a gate, never close one,
+    so everything the calendar rules held back stays held back."""
+    return senescence or state in SENESCENT_STATES, harvest or state in HARVEST_STATES

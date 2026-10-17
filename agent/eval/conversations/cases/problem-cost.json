@@ -1,0 +1,19 @@
+{
+  "name": "problem-cost",
+  "description": "'How much is this costing me?' only quotes dollar figures in the record/alert.",
+  "field": "north pivot",
+  "record": "required",
+  "setup": {
+    "ask_first": true
+  },
+  "turns": [
+    {
+      "say": "how much is this costing me on {field}?",
+      "checks": {
+        "no_new_numbers": true,
+        "consistent_with_record": true
+      },
+      "rubric": "Gives only the loss range already in the alert/record with its caveat, or says there is no estimate. Invents no dollar figure."
+    }
+  ]
+}

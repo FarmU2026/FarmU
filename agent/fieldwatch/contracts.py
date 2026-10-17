@@ -110,6 +110,21 @@ class Gates(Contract):
     regional: bool
 
 
+class CropState(Contract):
+    """What the crop is doing on the scene date (analysis/phenology.py decides; its docstring has the precedence).
+    Stress diagnosis is allowed only where `diagnosable`; `hail_only` marks the late pre-senescence window where
+    only the hail exception (`reasons` carries "hail_exception=True") may alert."""
+
+    state: Literal["pre_emergence", "vegetative", "reproductive", "senescing", "harvest_in_progress", "harvested", "unknown"]
+    stage_label: str | None = None          # e.g. "V8 (est.)", "R2 (est.)"
+    gdd_since_planting: float | None = None
+    planting_date: ISODate | None = None
+    planting_date_source: Literal["farmer", "state_default", "green_up", "unknown"] = "unknown"
+    diagnosable: bool                       # stress diagnosis allowed in this state
+    hail_only: bool = False                 # late season: only the hail exception may alert
+    reasons: list[str] = Field(default_factory=list)  # plain-words, e.g. "harvest passes detected on 2026-10-08"
+
+
 class Overlays(Contract):
     true_color: OverlayRef
     health: OverlayRef
@@ -162,17 +177,8 @@ class FieldAnalysisRequest(Contract):
     min_clear_fraction: float = 0.7
     min_region_acres: float = 1.2
     z_threshold: float = 2.0
-
-
-class CropState(Contract):
-    state: Literal["pre_emergence", "vegetative", "reproductive", "senescing", "harvest_in_progress", "harvested", "unknown"]
-    stage_label: str | None = None
-    gdd_since_planting: float | None = None
-    planting_date: ISODate | None = None
-    planting_date_source: Literal["farmer", "state_default", "green_up", "unknown"] = "unknown"
-    diagnosable: bool
-    hail_only: bool = False
-    reasons: list[str] = Field(default_factory=list)
+    planting_date: ISODate | None = Field(default=None, description="Farmer-given planting date for this field's current crop; "
+                                          "None = the analyzer uses the state's typical date")
 
 
 class FieldAnalysisResult(Contract):

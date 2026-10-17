@@ -1,0 +1,21 @@
+{
+  "name": "data-sources",
+  "description": "'What data do you use?' answers from the real tools; never says it cannot see fields.",
+  "field": "north pivot",
+  "turns": [
+    {
+      "say": "what data do you use?",
+      "checks": {
+        "must_mention_any": [
+          "satellite",
+          "imagery"
+        ],
+        "must_not_mention": [
+          "(can'?t|cannot|don'?t|unable|no way).{0,25}(see|access|view|look at).{0,20}(field|farm|land)",
+          "I don'?t have access"
+        ]
+      },
+      "rubric": "Names the real sources (satellite imagery, weather, soil, hail and drought records, field history) in plain words. Does not claim it cannot see the fields."
+    }
+  ]
+}
